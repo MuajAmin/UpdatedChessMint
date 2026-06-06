@@ -22,6 +22,37 @@ class EngineProcess(private val scope: CoroutineScope) {
     companion object {
         private const val TAG = "EngineProcess"
         private const val MAX_PENDING_COMMANDS = 128
+
+        /**
+         * Returns true if the engine output line should be forwarded to the
+         * JavaScript bridge.  Mint.js only processes a handful of UCI line
+         * types; everything else (currmove, nodes, nps, hashfull, tbhits …)
+         * is pure noise that chokes the main-thread evaluateJavascript path.
+         *
+         * Allowed lines:
+         *  • "uciok"
+         *  • "readyok"
+         *  • "bestmove …"
+         *  • "option name …"     (engine capability discovery)
+         *  • "info … score … pv …" (actual PV evaluation data)
+         *  • "Load eval file success: 1"  (NNUE load confirmation)
+         */
+        private fun shouldForwardLine(line: String): Boolean {
+            // Fast exact matches first
+            if (line == "uciok" || line == "readyok") return true
+            if (line.startsWith("bestmove ")) return true
+            if (line.startsWith("option name ")) return true
+            if (line == "Load eval file success: 1") return true
+
+            // For "info" lines only forward those containing a PV with a score.
+            // Lines like "info depth 5 currmove e2e4" lack "pv" and are noise.
+            if (line.startsWith("info ")) {
+                return line.contains(" pv ") && line.contains(" score ")
+            }
+
+            // Unknown/unexpected lines — forward to be safe
+            return true
+        }
     }
 
     private var process: Process? = null
@@ -65,8 +96,13 @@ class EngineProcess(private val scope: CoroutineScope) {
                     BufferedReader(InputStreamReader(startedProcess.inputStream)).use { reader ->
                         while (isActive) {
                             val line = reader.readLine() ?: break
-                            Log.d(TAG, "Engine: $line")
-                            _outputFlow.emit(line)
+                            // Only forward lines the JS bridge actually processes;
+                            // noisy intermediate info lines are discarded here to
+                            // avoid flooding the main-thread evaluateJavascript.
+                            if (shouldForwardLine(line)) {
+                                Log.d(TAG, "Engine: $line")
+                                _outputFlow.emit(line)
+                            }
                         }
                     }
                 } catch (e: Exception) {

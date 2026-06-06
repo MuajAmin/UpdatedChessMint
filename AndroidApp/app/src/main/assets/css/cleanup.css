@@ -1,0 +1,103 @@
+/*
+ * cleanup.css — Chess.com Mobile Web Cleanup
+ *
+ * Hides promotional banners, app download prompts, cookie consent,
+ * ad containers, and other mobile web clutter so the WebView wrapper
+ * feels like a native Chess.com app.
+ *
+ * Injected alongside depthbar.css and evalbar.css via the combined
+ * script in MainActivity.kt.
+ */
+
+/* ═══════════════════════════════════════════════════════════════════
+   App download / "Open in App" banners
+   ═══════════════════════════════════════════════════════════════════ */
+.smartbanner,
+.download-app-banner,
+.open-in-app-banner,
+.mobile-app-redirect,
+.mobile-app-promotion,
+.app-banner,
+.promo-banner,
+.install-app-banner,
+.get-app-banner,
+[class*="smart-banner"],
+[class*="app-banner"],
+[class*="open-in-app"],
+[class*="download-banner"] {
+    display: none !important;
+    height: 0 !important;
+    max-height: 0 !important;
+    overflow: hidden !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Advertisement containers
+   ═══════════════════════════════════════════════════════════════════ */
+.ad-container,
+.ad-wrapper,
+.shares-ad,
+.ads-container,
+.google-ad,
+.ad-component,
+#banner-ad,
+div[class*="ad-slot"],
+div[class*="ad-container"],
+div[class*="ad-wrapper"],
+div[id*="google_ads"],
+div[id*="div-gpt-ad"],
+iframe[id*="google_ads"] {
+    display: none !important;
+    height: 0 !important;
+    max-height: 0 !important;
+    overflow: hidden !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Premium / upgrade promotions
+   ═══════════════════════════════════════════════════════════════════ */
+.premium-promo,
+.app-promotion,
+.upgrade-banner,
+[class*="premium-promo"],
+[class*="upgrade-banner"],
+[class*="paywall-banner"] {
+    display: none !important;
+    height: 0 !important;
+    max-height: 0 !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Cookie consent / GDPR / privacy banners
+   ═══════════════════════════════════════════════════════════════════ */
+.cookie-banner,
+.cookie-consent,
+#cookie-consent,
+#onetrust-banner-sdk,
+[class*="cookie-banner"],
+[class*="cookie-consent"],
+[class*="consent-banner"],
+[id*="cookie-consent"],
+[id*="consent-banner"] {
+    display: none !important;
+    height: 0 !important;
+    max-height: 0 !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Footer commercials and guest prompts
+   ═══════════════════════════════════════════════════════════════════ */
+.footer-commercials,
+.guest-button-container,
+[class*="footer-commercial"] {
+    display: none !important;
+    visibility: hidden !important;
+}

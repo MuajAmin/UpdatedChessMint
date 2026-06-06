@@ -54,7 +54,7 @@ import com.example.updatedchessmint.engine.EngineProcess
 import com.example.updatedchessmint.theme.*
 import androidx.compose.animation.core.*
 import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.collect
 import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -174,7 +174,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
             launch {
-                engine.outputFlow.collectLatest { line ->
+                engine.outputFlow.collect { line ->
                     // Send engine output to the WebView
                     bridge?.sendToJavaScript(line)
                     // Add to console log (keep last 50 lines)
@@ -590,7 +590,10 @@ class MainActivity : ComponentActivity() {
             val depthBarCss = loadAsset(context, "css/depthbar.css").escapeForJs()
             val evalBarCss = loadAsset(context, "css/evalbar.css").escapeForJs()
             val materialIconCss = loadAsset(context, "css/material-icon.css").escapeForJs()
+            val cleanupCss = loadAsset(context, "css/cleanup.css").escapeForJs()
             append("(function(){function addStyle(c){var s=document.createElement('style');s.textContent=c;document.head.appendChild(s);}addStyle('")
+            append(cleanupCss)
+            append("');addStyle('")
             append(depthBarCss)
             append("');addStyle('")
             append(evalBarCss)

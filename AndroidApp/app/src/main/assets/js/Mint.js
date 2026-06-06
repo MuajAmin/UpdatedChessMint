@@ -333,6 +333,11 @@ class GameController {
     this.currentMarkings = [];
     this.analysisToolsInterval = null;
     this.disposed = false;
+    // Throttle state for intermediate HintMoves redraws.
+    // Final bestmove updates always draw immediately.
+    this._hintThrottleTimer = null;
+    this._hintThrottlePending = null;
+    this._hintThrottleIntervalMs = 100;
     this.controller.on("Move", (event) => {
       try {
         if (this.disposed) return;
@@ -561,6 +566,13 @@ class GameController {
   dispose() {
     this.clearAnalysisToolsInterval();
     this.RemoveCurrentMarkings();
+    // Clean up throttle timers
+    if (this._hintThrottleTimer !== null) {
+      clearTimeout(this._hintThrottleTimer);
+      cancelAnimationFrame(this._hintThrottleTimer);
+      this._hintThrottleTimer = null;
+    }
+    this._hintThrottlePending = null;
 
     let depthNode = this.depthBar;
     while (
@@ -590,6 +602,45 @@ class GameController {
     if (!Array.isArray(topMoves) || topMoves.length === 0) return;
     topMoves = topMoves.filter((move) => move && move.from && move.to);
     if (topMoves.length === 0) return;
+
+    // For final bestmove: cancel any pending throttled draw and render immediately.
+    if (isBestMove) {
+      if (this._hintThrottleTimer !== null) {
+        cancelAnimationFrame(this._hintThrottleTimer);
+        this._hintThrottleTimer = null;
+      }
+      this._hintThrottlePending = null;
+      this._drawHintMoves(topMoves, lastTopMoves, isBestMove);
+      return;
+    }
+
+    // For intermediate evaluations: cache the latest data and schedule a
+    // throttled draw so we redraw at most once per ~100ms.
+    this._hintThrottlePending = { topMoves: topMoves, lastTopMoves: lastTopMoves, isBestMove: isBestMove };
+    if (this._hintThrottleTimer === null) {
+      var self = this;
+      this._hintThrottleTimer = requestAnimationFrame(function() {
+        self._hintThrottleTimer = null;
+        if (self.disposed || !self._hintThrottlePending) return;
+        var pending = self._hintThrottlePending;
+        self._hintThrottlePending = null;
+        self._drawHintMoves(pending.topMoves, pending.lastTopMoves, pending.isBestMove);
+        // Enforce minimum interval between draws
+        self._hintThrottleTimer = setTimeout(function() {
+          self._hintThrottleTimer = null;
+          // If another update arrived during the cooldown, draw it now
+          if (self._hintThrottlePending) {
+            var p = self._hintThrottlePending;
+            self._hintThrottlePending = null;
+            self._drawHintMoves(p.topMoves, p.lastTopMoves, p.isBestMove);
+          }
+        }, self._hintThrottleIntervalMs);
+      });
+    }
+  }
+  // The actual draw logic, extracted from the original HintMoves.
+  _drawHintMoves(topMoves, lastTopMoves, isBestMove) {
+    if (this.disposed) return;
     let bestMove = topMoves[0];
     if (getBooleanConfig(enumOptions.ShowHints, true) && this.controller.markings) {
       this.RemoveCurrentMarkings();
