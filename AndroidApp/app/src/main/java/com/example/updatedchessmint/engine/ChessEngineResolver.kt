@@ -16,8 +16,14 @@ data class ChessEngine(
     val name: String,
     val packageName: String,
     val authority: String,
-    val fileName: String
+    val fileName: String,
+    val source: EngineSource = EngineSource.OEX
 )
+
+enum class EngineSource {
+    Bundled,
+    OEX
+}
 
 /**
  * Discovers chess engines installed via Open Exchange (OEX) protocol.
@@ -38,6 +44,11 @@ class ChessEngineResolver(private val context: Context) {
      */
     fun resolveEngines(): List<ChessEngine> {
         val engines = mutableListOf<ChessEngine>()
+
+        findBundledEngine()?.let { bundledEngine ->
+            engines.add(bundledEngine)
+        }
+
         val intent = Intent(OEX_ACTION)
 
         val resolveInfoList: List<ResolveInfo> = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -74,6 +85,10 @@ class ChessEngineResolver(private val context: Context) {
      * Returns the File pointing to the executable, or null if copy failed.
      */
     fun copyEngineToFiles(engine: ChessEngine): File? {
+        if (engine.source == EngineSource.Bundled) {
+            return File(engine.fileName).takeIf { it.exists() && it.canExecute() }
+        }
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
             context.applicationInfo.targetSdkVersion >= Build.VERSION_CODES.Q
         ) {
@@ -102,6 +117,36 @@ class ChessEngineResolver(private val context: Context) {
         } catch (e: Exception) {
             e.printStackTrace()
             null
+        }
+    }
+
+    private fun findBundledEngine(): ChessEngine? {
+        val nativeDir = File(context.applicationInfo.nativeLibraryDir ?: return null)
+        val candidates = listOf(
+            "libstockfish.so",
+            "libstockfish_android.so",
+            "libengine.so",
+            "stockfish"
+        )
+        val engineFile = candidates
+            .asSequence()
+            .map { File(nativeDir, it) }
+            .firstOrNull { it.exists() && it.canExecute() }
+            ?: nativeDir.listFiles()
+                ?.firstOrNull { file ->
+                    file.isFile &&
+                        file.canExecute() &&
+                        file.name.contains("stockfish", ignoreCase = true)
+                }
+
+        return engineFile?.let {
+            ChessEngine(
+                name = "Bundled Stockfish",
+                packageName = context.packageName,
+                authority = "",
+                fileName = it.absolutePath,
+                source = EngineSource.Bundled
+            )
         }
     }
 

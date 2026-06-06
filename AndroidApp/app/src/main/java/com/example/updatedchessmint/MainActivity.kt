@@ -9,6 +9,7 @@ import android.util.Log
 import android.view.View
 import android.view.WindowInsetsController
 import android.webkit.ConsoleMessage
+import android.webkit.CookieManager
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
@@ -159,6 +160,9 @@ class MainActivity : ComponentActivity() {
                             builtInZoomControls = true
                             displayZoomControls = false
                             databaseEnabled = true
+                            loadsImagesAutomatically = true
+                            blockNetworkImage = false
+                            textZoom = 100
                             mediaPlaybackRequiresUserGesture = false
                             javaScriptCanOpenWindowsAutomatically = false
                             userAgentString = settings.userAgentString.replace(
@@ -168,8 +172,11 @@ class MainActivity : ComponentActivity() {
                             setSupportMultipleWindows(false)
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                                 safeBrowsingEnabled = true
+                                offscreenPreRaster = true
                             }
                         }
+                        CookieManager.getInstance().setAcceptCookie(true)
+                        CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
 
                         // Create the engine process
                         val ep = EngineProcess(engineScope)
@@ -194,14 +201,23 @@ class MainActivity : ComponentActivity() {
                                 view: WebView?, request: WebResourceRequest?
                             ): Boolean {
                                 val url = request?.url?.toString() ?: return false
-                                // Keep chess.com navigation inside the WebView
-                                return !isAllowedChessUrl(url)
+                                return shouldBlockTopLevelNavigation(url)
+                            }
+
+                            override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                                super.onPageStarted(view, url, favicon)
+                                if (isWebUrl(url)) {
+                                    pageLoaded = false
+                                }
                             }
 
                             override fun onPageFinished(view: WebView?, url: String?) {
                                 super.onPageFinished(view, url)
-                                if (isAllowedChessUrl(url)) {
+                                if (isWebUrl(url)) {
+                                    CookieManager.getInstance().flush()
                                     pageLoaded = true
+                                }
+                                if (isAllowedChessUrl(url)) {
                                     injectScripts(view, ctx)
                                 }
                             }
@@ -389,6 +405,21 @@ class MainActivity : ComponentActivity() {
             (scheme == "https" || scheme == "http") && (host == "chess.com" || host.endsWith(".chess.com"))
         } catch (_: Exception) {
             false
+        }
+    }
+
+    private fun isWebUrl(url: String?): Boolean {
+        if (url.isNullOrBlank()) return false
+        val scheme = Uri.parse(url).scheme?.lowercase(Locale.US)
+        return scheme == "https" || scheme == "http"
+    }
+
+    private fun shouldBlockTopLevelNavigation(url: String?): Boolean {
+        if (url.isNullOrBlank()) return false
+        val scheme = Uri.parse(url).scheme?.lowercase(Locale.US)
+        return when (scheme) {
+            "http", "https", "about", "blob", "data" -> false
+            else -> true
         }
     }
 
