@@ -2,7 +2,7 @@
   <img width="600" src="https://i.ibb.co/6Pz1c3B/1-background.png">
   <br><br>
   <a href="https://discord.com/servers/updatedchessmint-development-1098267851732815932"><img alt="UpdatedChessMint Discord" src="https://img.shields.io/badge/Discord-UpdatedChessMint-0?style=flat&logo=discord"></a>
-  <a href="https://github.com/BotSolvers/UpdatedChessMint/releases/"><img alt="Download UpdatedChessMint" src="https://img.shields.io/github/downloads/BotSolvers/UpdatedChessMint/total?color=%2331c754&label=Downloads"></a>
+  <a href="https://github.com/MuajAmin/UpdatedChessMint/releases/"><img alt="Download UpdatedChessMint" src="https://img.shields.io/github/downloads/MuajAmin/UpdatedChessMint/total?color=%2331c754&label=Downloads"></a>
 </p>
 
 <h1 align="center">👑 UpdatedChessMint V2: Your Chess.com Companion! ♟️</h1>
@@ -20,7 +20,7 @@
 </p>
 
 <p align="center">
-  - <strong>Download the latest version of UpdatedChessMint V2</strong>: <a href="https://github.com/BotSolvers/UpdatedChessMint/releases/">UpdatedChessMint V2.zip</a>
+  - <strong>Download the latest version of UpdatedChessMint V2</strong>: <a href="https://github.com/MuajAmin/UpdatedChessMint/releases/">UpdatedChessMint V2.zip</a>
 </p>
 <p align="center">
   - <strong>Download and install Python 3.12.3</strong>: <a href="https://www.python.org/ftp/python/3.12.3/python-3.12.3-amd64.exe">Python Installer</a>. Make sure to check the box that says "Add Python to PATH".
@@ -87,7 +87,7 @@
   - <a href="https://github.com/sakiodre">thedemons</a> - Original Creator<br>
   - <a href="https://github.com/webcubed">Webcubed</a> - Development<br>
   - <a href="https://github.com/hotamago">HotaVN</a> - Development and Improvements<br>
-  - <a href="https://github.com/BotSolvers">UpdatedChessMint</a> - Own Development and Maintenance<br>
+  - <a href="https://github.com/MuajAmin">UpdatedChessMint</a> - Own Development and Maintenance<br>
   - <a href="https://github.com/ProtonDev-sys">ProtonDev</a> - API Docs & Public API Host<br>
     - <a href="https://github.com/gmcheems">GMCheems</a> - Made GMCheems
   - <a href="https://github.com/lucaskvasirr">lucaskvasirr</a> - Premove Code Snippet
