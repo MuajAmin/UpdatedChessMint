@@ -57,6 +57,7 @@ class MainActivity : ComponentActivity() {
 
     private var engineProcess: EngineProcess? = null
     private var bridge: ChessMintBridge? = null
+    private var cachedCombinedScript: String? = null
     private val engineScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -168,13 +169,17 @@ class MainActivity : ComponentActivity() {
                             userAgentString = settings.userAgentString.replace(
                                 "; wv", ""
                             ) // Remove WebView indicator from UA
-                            cacheMode = WebSettings.LOAD_DEFAULT
+                            cacheMode = WebSettings.LOAD_CACHE_ELSE_NETWORK
                             setSupportMultipleWindows(false)
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                                safeBrowsingEnabled = true
+                                safeBrowsingEnabled = false
                                 offscreenPreRaster = true
                             }
                         }
+
+                        // GPU hardware layer for faster rendering
+                        setLayerType(View.LAYER_TYPE_HARDWARE, null)
+
                         CookieManager.getInstance().setAcceptCookie(true)
                         CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
 
@@ -214,7 +219,6 @@ class MainActivity : ComponentActivity() {
                             override fun onPageFinished(view: WebView?, url: String?) {
                                 super.onPageFinished(view, url)
                                 if (isWebUrl(url)) {
-                                    CookieManager.getInstance().flush()
                                     pageLoaded = true
                                 }
                                 if (isAllowedChessUrl(url)) {
@@ -423,38 +427,30 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // Cached combined script — built once, reused on every page load
+    private fun getCombinedScript(context: Context): String {
+        return cachedCombinedScript ?: buildString {
+            append(loadAsset(context, "js/MintJsAdapter.js"))
+            append(";\n")
+            val depthBarCss = loadAsset(context, "css/depthbar.css").escapeForJs()
+            val evalBarCss = loadAsset(context, "css/evalbar.css").escapeForJs()
+            val materialIconCss = loadAsset(context, "css/material-icon.css").escapeForJs()
+            append("(function(){function addStyle(c){var s=document.createElement('style');s.textContent=c;document.head.appendChild(s);}addStyle('")
+            append(depthBarCss)
+            append("');addStyle('")
+            append(evalBarCss)
+            append("');addStyle('")
+            append(materialIconCss)
+            append("');})();\n")
+            append(loadAsset(context, "js/Mint.js"))
+        }.also { cachedCombinedScript = it }
+    }
+
     @SuppressLint("SetJavaScriptEnabled")
     private fun injectScripts(webView: WebView?, context: Context) {
         webView ?: return
-
-        // Read and inject MintJsAdapter.js first (sets up mocks)
-        val adapterJs = loadAsset(context, "js/MintJsAdapter.js")
-        webView.evaluateJavascript(adapterJs, null)
-
-        // Inject CSS styles
-        val depthBarCss = loadAsset(context, "css/depthbar.css").escapeForJs()
-        val evalBarCss = loadAsset(context, "css/evalbar.css").escapeForJs()
-        val materialIconCss = loadAsset(context, "css/material-icon.css").escapeForJs()
-
-        val injectCssJs = """
-            (function() {
-                function addStyle(css) {
-                    var s = document.createElement('style');
-                    s.textContent = css;
-                    document.head.appendChild(s);
-                }
-                addStyle('$depthBarCss');
-                addStyle('$evalBarCss');
-                addStyle('$materialIconCss');
-            })();
-        """.trimIndent()
-        webView.evaluateJavascript(injectCssJs, null)
-
-        // Inject Mint.js
-        val mintJs = loadAsset(context, "js/Mint.js")
-        webView.evaluateJavascript(mintJs, null)
-
-        Log.i("MainActivity", "All scripts injected into Chess.com")
+        webView.evaluateJavascript(getCombinedScript(context), null)
+        Log.i("MainActivity", "All scripts injected in single call")
     }
 
     private fun loadAsset(context: Context, path: String): String {

@@ -10,7 +10,10 @@ android {
     defaultConfig {
         applicationId = "com.example.updatedchessmint"
         minSdk = 23
-        targetSdk = 36
+        // OEX engines are copied executable files. Android blocks exec() from
+        // app-writable storage for apps targeting API 29+, so match DroidFish's
+        // target level to keep installed OEX engines usable.
+        targetSdk = 28
         versionCode = 1
         versionName = "2.0.5"
 
