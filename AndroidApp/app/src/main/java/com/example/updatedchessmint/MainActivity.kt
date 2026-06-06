@@ -109,6 +109,8 @@ class MainActivity : ComponentActivity() {
         var availableEngines by remember { mutableStateOf<List<ChessEngine>>(emptyList()) }
         var consoleLog by remember { mutableStateOf<List<String>>(emptyList()) }
         var pageLoaded by remember { mutableStateOf(false) }
+        // Track the last loaded host to detect full navigations vs SPA navigations
+        var lastLoadedHost by remember { mutableStateOf("") }
         val lowPowerMode = remember { isLowPowerAndroidDevice() }
 
         // Settings state
@@ -175,7 +177,8 @@ class MainActivity : ComponentActivity() {
                             mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
                             useWideViewPort = true
                             loadWithOverviewMode = true
-                            builtInZoomControls = true
+                            // Disable pinch-zoom for a native app feel
+                            builtInZoomControls = false
                             displayZoomControls = false
                             databaseEnabled = true
                             loadsImagesAutomatically = true
@@ -183,10 +186,14 @@ class MainActivity : ComponentActivity() {
                             textZoom = 100
                             mediaPlaybackRequiresUserGesture = false
                             javaScriptCanOpenWindowsAutomatically = false
-                            userAgentString = settings.userAgentString.replace(
-                                "; wv", ""
-                            ) // Remove WebView indicator from UA
-                            cacheMode = WebSettings.LOAD_DEFAULT
+                            // Use a clean mobile Chrome UA — Chess.com serves the best
+                            // mobile experience to Chrome Mobile and does not penalise
+                            // the "; wv" token as heavily as some other sites, but
+                            // removing it avoids some Chess.com SPA quirks.
+                            userAgentString = settings.userAgentString.replace("; wv", "")
+                            // Cache-first loading: serve cached resources immediately,
+                            // fetch from network only when missing. Speeds up repeat loads.
+                            cacheMode = WebSettings.LOAD_CACHE_ELSE_NETWORK
                             setSupportMultipleWindows(false)
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                                 safeBrowsingEnabled = false
@@ -195,9 +202,9 @@ class MainActivity : ComponentActivity() {
                             disableWebViewDarkening(this)
                         }
 
-                        // The default layer avoids black WebView surfaces on some Android GPU/WebView builds.
-                        setLayerType(View.LAYER_TYPE_NONE, null)
-                        setBackgroundColor(android.graphics.Color.WHITE)
+                        // Hardware acceleration for smooth rendering
+                        setLayerType(View.LAYER_TYPE_HARDWARE, null)
+                        setBackgroundColor(android.graphics.Color.parseColor("#1a1a1a"))
 
                         CookieManager.getInstance().setAcceptCookie(true)
                         CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
@@ -226,9 +233,23 @@ class MainActivity : ComponentActivity() {
 
                             override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
                                 super.onPageStarted(view, url, favicon)
-                                if (isWebUrl(url)) {
+                                if (!isWebUrl(url)) return
+                                // ── SPA-safe overlay logic ──────────────────────────────
+                                // Chess.com is a SPA: clicking "New Game" triggers
+                                // onPageStarted for the same host.  Only show the
+                                // loading overlay when the HOST changes (i.e. a genuine
+                                // full cross-origin navigation), NOT for same-host
+                                // path/hash/query changes.
+                                val incomingHost = try {
+                                    Uri.parse(url).host?.lowercase(Locale.US) ?: ""
+                                } catch (_: Exception) { "" }
+                                val isNewHost = incomingHost.isNotEmpty() && incomingHost != lastLoadedHost
+                                if (isNewHost) {
                                     pageLoaded = false
                                 }
+                                // always keep lastLoadedHost current so the first load
+                                // (empty string) correctly triggers the splash once.
+                                lastLoadedHost = incomingHost
                             }
 
                             override fun onPageCommitVisible(view: WebView?, url: String?) {
@@ -255,35 +276,15 @@ class MainActivity : ComponentActivity() {
                 }
             )
 
-            // Loading overlay
-            if (!pageLoaded) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(DarkBackground),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        CircularProgressIndicator(
-                            color = AccentPurple,
-                            strokeWidth = 3.dp,
-                            modifier = Modifier.size(48.dp)
-                        )
-                        Spacer(modifier = Modifier.height(20.dp))
-                        Text(
-                            "Loading Chess.com...",
-                            color = TextPrimary,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            "Preparing assistant engine",
-                            color = TextSecondary,
-                            fontSize = 12.sp
-                        )
-                    }
-                }
+            // Loading overlay — Chess.com style splash
+            // Uses AnimatedVisibility so the overlay fades out smoothly instead
+            // of popping away, which removes any flicker when the page appears.
+            AnimatedVisibility(
+                visible = !pageLoaded,
+                enter = fadeIn(),
+                exit = fadeOut(animationSpec = tween(350))
+            ) {
+                ChessComLoadingScreen()
             }
 
             // Floating Action Button - Control Panel Toggle
@@ -311,7 +312,8 @@ class MainActivity : ComponentActivity() {
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
-                        .padding(16.dp)
+                        // Raised higher so it never overlaps Chess.com's bottom nav bar
+                        .padding(bottom = 80.dp, end = 16.dp)
                         .size(54.dp),
                     contentAlignment = Alignment.Center
                 ) {
@@ -605,6 +607,165 @@ class MainActivity : ComponentActivity() {
             .replace("\"", "\\\"")
             .replace("\n", "\\n")
             .replace("\r", "\\r")
+    }
+}
+
+// ===========================================================================
+// Chess.com-Style Loading Screen
+// ===========================================================================
+
+@Composable
+fun ChessComLoadingScreen() {
+    val infiniteTransition = rememberInfiniteTransition(label = "loadingPulse")
+
+    // Animated chess-green glow pulse
+    val glowAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 0.9f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(900, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "glowAlpha"
+    )
+
+    // Subtle scale for the logo box
+    val logoScale by infiniteTransition.animateFloat(
+        initialValue = 0.97f,
+        targetValue = 1.03f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "logoScale"
+    )
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFF1a1a1a),
+                        Color(0xFF0d0d0d)
+                    )
+                )
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            // Chess.com logo-style mark: green pawn on dark square
+            Box(
+                modifier = Modifier
+                    .size(88.dp)
+                    .scale(logoScale)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(
+                        Brush.radialGradient(
+                            colors = listOf(
+                                Color(0xFF4CAF50),
+                                Color(0xFF2E7D32)
+                            )
+                        )
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                // Glowing ring
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(20.dp))
+                        .border(
+                            width = 2.dp,
+                            color = Color(0xFF81C784).copy(alpha = glowAlpha),
+                            shape = RoundedCornerShape(20.dp)
+                        )
+                )
+                Text(
+                    text = "♟",
+                    fontSize = 48.sp,
+                    color = Color.White
+                )
+            }
+
+            Spacer(modifier = Modifier.height(28.dp))
+
+            // chess.com wordmark style
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "chess",
+                    color = Color.White,
+                    fontSize = 26.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = (-0.5).sp
+                )
+                Text(
+                    text = ".com",
+                    color = Color(0xFF4CAF50),
+                    fontSize = 26.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = (-0.5).sp
+                )
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Text(
+                text = "with Mint Assistant",
+                color = Color(0xFF9E9E9E),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Normal,
+                letterSpacing = 0.5.sp
+            )
+
+            Spacer(modifier = Modifier.height(40.dp))
+
+            // Green loading bar — Chess.com style thin progress
+            val progress by infiniteTransition.animateFloat(
+                initialValue = 0f,
+                targetValue = 1f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(1600, easing = LinearOutSlowInEasing),
+                    repeatMode = RepeatMode.Restart
+                ),
+                label = "progressBar"
+            )
+
+            Box(
+                modifier = Modifier
+                    .width(160.dp)
+                    .height(3.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(Color(0xFF2E2E2E))
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .fillMaxWidth(progress)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(
+                            Brush.horizontalGradient(
+                                colors = listOf(
+                                    Color(0xFF4CAF50),
+                                    Color(0xFF81C784)
+                                )
+                            )
+                        )
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Text(
+                text = "Connecting...",
+                color = Color(0xFF757575),
+                fontSize = 11.sp,
+                letterSpacing = 1.sp
+            )
+        }
     }
 }
 
