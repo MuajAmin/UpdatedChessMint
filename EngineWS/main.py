@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.websockets import WebSocketState
 import time
+from contextlib import asynccontextmanager
 
 # Helper function to show progress messages
 def show_message(msg):
@@ -18,7 +19,7 @@ def show_message(msg):
 
 # Function to enqueue subprocess output
 def enqueue_output(out, queue):
-    for line in iter(out.readline, b''):
+    for line in iter(out.readline, ''):
         queue.put(line)
     out.close()
 
@@ -87,8 +88,23 @@ if not engine_exe_paths:
 # Initialize engines
 engines = [EngineChess(path) for path in engine_exe_paths]
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+    # Clean up all engine processes on shutdown
+    for engine in engines:
+        try:
+            engine.put("quit")
+            engine._engine.terminate()
+            try:
+                engine._engine.wait(timeout=1.0)
+            except subprocess.TimeoutExpired:
+                engine._engine.kill()
+        except Exception as e:
+            print(f"Error terminating engine process: {e}")
+
 # FastAPI app
-app = FastAPI()
+app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -108,9 +124,9 @@ async def websocket_endpoint(websocket: WebSocket):
         return
 
     active_connections.add(websocket)
-    await websocket.accept()
 
     try:
+        await websocket.accept()
         async def process_client_command(data):
             """Process commands received from the client."""
             if data.startswith("ucinewgame"):
