@@ -50,7 +50,7 @@ function injectScript(file) {
 chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
   if (request.data !== "popout") {
     window.dispatchEvent(
-      new CustomEvent("BetterMintUpdateOptions", {
+      new CustomEvent("UpdatedChessMintUpdateOptions", {
         detail: request.data,
       })
     );
@@ -59,8 +59,8 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
   }
 });
 
-// Respond to BetterMintGetOptions events
-window.addEventListener("BetterMintGetOptions", function (evt) {
+// Respond to UpdatedChessMintGetOptions events
+window.addEventListener("UpdatedChessMintGetOptions", function (evt) {
   chrome.storage.sync.get(DefaultExtensionOptions, function (opts) {
     let request = evt.detail;
     let response = {
@@ -68,7 +68,7 @@ window.addEventListener("BetterMintGetOptions", function (evt) {
       data: opts,
     };
     window.dispatchEvent(
-      new CustomEvent("BetterMintSendOptions", {
+      new CustomEvent("UpdatedChessMintSendOptions", {
         detail: response,
       })
     );

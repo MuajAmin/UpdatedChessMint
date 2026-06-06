@@ -1,14 +1,14 @@
 {
     "manifest_version": 3,
-    "name": "Mint V2 - Chess",
-    "short_name": "Mint V2 - Chess",
+    "name": "UpdatedChessMint V2",
+    "short_name": "UpdatedChessMint",
     "icons": {
         "16": "img/logo-16.png",
         "48": "img/logo-48.png",
         "128": "img/logo-128.png"
     },
     "version": "2.0.5",
-    "description": "Mint is a tool that helps you get better at chess.",
+    "description": "UpdatedChessMint is a tool that helps you get better at chess.",
     "permissions": [
         "storage",
         "declarativeNetRequest"

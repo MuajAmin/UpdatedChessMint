@@ -204,5 +204,5 @@ async def get():
 """)
 
 if __name__ == "__main__":
-    print("BetterMint Initialized!")
+    print("UpdatedChessMint Initialized!")
     print("All selected engines are active.")
