@@ -489,9 +489,10 @@ class StockfishEngine {
     this.isInTheory = false;
     this.lastMoveScore = null;
     this.depth = getValueConfig(enumOptions.Depth);
+    this.supportedEngineOptions = new Set();
+    this.hasReceivedEngineOptions = false;
+    this.reportedUnsupportedEngineOptions = new Set();
     this.options = {
-      // "Move Overhead": "",
-      "Slow Mover": "10",
       "MultiPV": getValueConfig(enumOptions.MultiPV),
     };
 
@@ -521,10 +522,6 @@ class StockfishEngine {
         this.ProcessMessage(e);
       };
       this.send("uci");
-      this.onReady(() => {
-        this.UpdateOptions();
-        this.send("ucinewgame");
-      });
     } catch (e) {
       alert("Failed to load stockfish");
       throw e;
@@ -538,10 +535,6 @@ class StockfishEngine {
         console.log("WebSocket connection opened.");
         this.reconnectAttempts = 0;
         this.send("uci");
-        this.onReady(() => {
-          this.UpdateOptions();
-          this.send("ucinewgame");
-        });
       });
 
       this.stockfish.addEventListener("message", (event) => {
@@ -564,18 +557,26 @@ class StockfishEngine {
   }
 
   send(cmd) {
-    if (this.isWebSocketOpen()) {
-      if (!getValueConfig(enumOptions.ApiStockfish)) {
-        this.stockfish.postMessage(cmd);
-      } else {
-        this.stockfish.send(cmd);
-      }
+    if (!this.stockfish) {
+      console.warn("Stockfish engine not initialized yet.");
+      return;
+    }
+    if (!getValueConfig(enumOptions.ApiStockfish)) {
+      // Worker mode — use postMessage
+      this.stockfish.postMessage(cmd);
     } else {
-      console.warn("Attempted to send command while WebSocket is not open.");
+      // WebSocket mode — check connection state first
+      if (this.isWebSocketOpen()) {
+        this.stockfish.send(cmd);
+      } else {
+        console.warn("Attempted to send command while WebSocket is not open:", cmd);
+      }
     }
   }
 
   isWebSocketOpen() {
+    // Only relevant in WebSocket mode
+    if (!getValueConfig(enumOptions.ApiStockfish)) return true; // Worker is always "open"
     return this.stockfish && this.stockfish.readyState === WebSocket.OPEN;
   }
 
@@ -686,27 +687,61 @@ class StockfishEngine {
   }
 
   UpdateExtensionOptions(options) {
-    // Handle both null/undefined cases
-    if (options == null) options = this.options;
-    Object.keys(options).forEach((key) => {
-      this.send(`setoption name ${key} value ${options[key]}`);
-    });
+    if (options == null) options = {};
     this.depth = getValueConfig(enumOptions.Depth);
+    this.options["MultiPV"] = getValueConfig(enumOptions.MultiPV);
+    this.UpdateOptions(this.options);
     if (this.topMoves.length > 0) this.onTopMoves(null, !this.isEvaluating);
   }
 
   UpdateOptions(options = null) {
     if (options === null) options = this.options;
     Object.keys(options).forEach((key) => {
-      this.send(`setoption name ${key} value ${options[key]}`);
+      this.sendEngineOption(key, options[key]);
     });
+  }
+  normalizeEngineOptionName(name) {
+    return String(name || "").trim().toLowerCase();
+  }
+  registerEngineOption(line) {
+    let optionMatch = line.match(/^option name\s+(.+?)\s+type\s+/i);
+    if (!optionMatch) return false;
+    this.hasReceivedEngineOptions = true;
+    this.supportedEngineOptions.add(
+      this.normalizeEngineOptionName(optionMatch[1])
+    );
+    return true;
+  }
+  isEngineOptionSupported(key) {
+    if (!this.hasReceivedEngineOptions) return true;
+    return this.supportedEngineOptions.has(this.normalizeEngineOptionName(key));
+  }
+  sendEngineOption(key, value) {
+    if (value === undefined || value === null || value === "") return;
+    if (!this.isEngineOptionSupported(key)) {
+      let normalized = this.normalizeEngineOptionName(key);
+      if (!this.reportedUnsupportedEngineOptions.has(normalized)) {
+        this.reportedUnsupportedEngineOptions.add(normalized);
+        console.info(`Skipped unsupported engine option: ${key}.`);
+      }
+      return;
+    }
+    this.send(`setoption name ${key} value ${value}`);
   }
   ProcessMessage(event) {
     this.ready = false;
     let line = event && typeof event === "object" ? event.data : event;
+    if (typeof line !== "string" || line.length === 0) return;
   
+    if (this.registerEngineOption(line)) {
+      return;
+    }
+
     if (line === "uciok") {
       this.loaded = true;
+      this.UpdateOptions();
+      this.send("ucinewgame");
+      this.send("isready");
       this.UpdatedChessMintmaster.onEngineLoaded();
     } else if (line === "readyok") {
       this.ready = true;
@@ -1571,9 +1606,9 @@ if (oldPeerConnection) {
 window.addEventListener(
   "bm",
   function (event) {
-    // get
+    // Debug: log best move event
     if (event.source === window && event.data) {
-      this.alert("best move: " + event);
+      console.log("best move event:", event.data);
     }
   },
   false

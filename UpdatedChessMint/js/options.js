@@ -128,14 +128,25 @@ function OnOptionsChange() {
   }
 
   chrome.storage.sync.set(options);
-  chrome.tabs.query({}, function (tabs) {
-    tabs.forEach(function (tab) {
-      chrome.tabs.sendMessage(tab.id, {
-        type: "UpdateOptions",
-        data: options,
+  try {
+    chrome.tabs.query({}, function (tabs) {
+      if (chrome.runtime.lastError) {
+        console.warn("tabs.query error:", chrome.runtime.lastError.message);
+        return;
+      }
+      tabs.forEach(function (tab) {
+        chrome.tabs.sendMessage(tab.id, {
+          type: "UpdateOptions",
+          data: options,
+        }, function() {
+          // Ignore errors for tabs that don't have the content script
+          if (chrome.runtime.lastError) { /* intentionally ignored */ }
+        });
       });
     });
-  });
+  } catch (e) {
+    console.warn("Could not broadcast settings update:", e);
+  }
 }
 
 function InitOptions() {
@@ -199,14 +210,24 @@ window.onload = function () {
   });
 
   document.getElementById("popoutb").addEventListener("click", function () {
-    chrome.tabs.query({}, function (tabs) {
-      tabs.forEach(function (tab) {
-        chrome.tabs.sendMessage(tab.id, {
-          type: "popout",
-          data: "popout",
+    try {
+      chrome.tabs.query({}, function (tabs) {
+        if (chrome.runtime.lastError) {
+          console.warn("tabs.query error:", chrome.runtime.lastError.message);
+          return;
+        }
+        tabs.forEach(function (tab) {
+          chrome.tabs.sendMessage(tab.id, {
+            type: "popout",
+            data: "popout",
+          }, function() {
+            if (chrome.runtime.lastError) { /* intentionally ignored */ }
+          });
         });
       });
-    });
+    } catch (e) {
+      console.warn("Could not send popout command:", e);
+    }
   });
 
   document.getElementById("ultradark").addEventListener("click", function () {

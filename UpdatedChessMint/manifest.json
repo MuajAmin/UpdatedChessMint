@@ -11,6 +11,7 @@
     "description": "UpdatedChessMint is a tool that helps you get better at chess.",
     "permissions": [
         "storage",
+        "tabs",
         "declarativeNetRequest"
     ],
     "host_permissions": [

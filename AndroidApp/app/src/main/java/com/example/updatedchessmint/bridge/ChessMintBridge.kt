@@ -3,6 +3,7 @@ package com.example.updatedchessmint.bridge
 import android.util.Log
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
+import android.os.Build
 import com.example.updatedchessmint.engine.EngineProcess
 import org.json.JSONObject
 
@@ -45,6 +46,22 @@ class ChessMintBridge(
     @JavascriptInterface
     fun getEngineName(): String {
         return engineProcess.engineName.value
+    }
+
+    /**
+     * Device/runtime hints used by the injected JavaScript to pick lighter
+     * engine defaults on 32-bit and low-memory Android devices.
+     */
+    @JavascriptInterface
+    fun getDeviceProfile(): String {
+        val runtime = Runtime.getRuntime()
+        return JSONObject()
+            .put("is64Bit", android.os.Process.is64Bit())
+            .put("supports64Bit", Build.SUPPORTED_64_BIT_ABIS.isNotEmpty())
+            .put("abis", Build.SUPPORTED_ABIS.joinToString(","))
+            .put("processors", runtime.availableProcessors())
+            .put("maxMemoryMb", runtime.maxMemory() / (1024 * 1024))
+            .toString()
     }
 
     /**

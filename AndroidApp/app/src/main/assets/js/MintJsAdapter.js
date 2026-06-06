@@ -23,15 +23,39 @@
     // ========================================================================
     // Default Options (ported from loader.js / options.js)
     // ========================================================================
+    function readDeviceProfile() {
+        var profile = {
+            is64Bit: true,
+            processors: 4,
+            maxMemoryMb: 256,
+            lowPower: false
+        };
+        try {
+            if (window.ChessMintAndroid && window.ChessMintAndroid.getDeviceProfile) {
+                var nativeProfile = JSON.parse(window.ChessMintAndroid.getDeviceProfile());
+                Object.assign(profile, nativeProfile);
+            }
+        } catch(e) {}
+        profile.lowPower =
+            profile.is64Bit === false ||
+            Number(profile.maxMemoryMb || 0) > 0 && Number(profile.maxMemoryMb) <= 192 ||
+            Number(profile.processors || 0) > 0 && Number(profile.processors) <= 2;
+        return profile;
+    }
+
+    var deviceProfile = readDeviceProfile();
+    window.__UpdatedChessMintDeviceProfile = deviceProfile;
+    var lowPowerDefaults = !!deviceProfile.lowPower;
     var defaultOptions = {
         "option-url-api-stockfish": "native://engine",
         "option-api-stockfish": true,
         "option-num-cores": 1,
-        "option-hashtable-ram": 1024,
-        "option-depth": 3,
+        "option-hashtable-ram": lowPowerDefaults ? 64 : 256,
+        "option-depth": lowPowerDefaults ? 2 : 3,
         "option-mate-finder-value": 5,
-        "option-multipv": 3,
+        "option-multipv": lowPowerDefaults ? 1 : 3,
         "option-highmatechance": false,
+        "option-limit-strength": false,
         "option-auto-move-time": 0,
         "option-auto-move-time-random": 10000,
         "option-auto-move-time-random-div": 10,
@@ -62,7 +86,44 @@
         }
     } catch(e) {}
 
-    var currentOptions = Object.assign({}, defaultOptions, savedOptions);
+    function clampNumber(value, min, max, fallback) {
+        var number = Number(value);
+        if (!Number.isFinite(number)) number = fallback;
+        if (number < min) return min;
+        if (number > max) return max;
+        return Math.round(number);
+    }
+
+    function normalizeOptions(options) {
+        var normalized = Object.assign({}, options || {});
+        normalized["option-num-cores"] = clampNumber(
+            normalized["option-num-cores"],
+            1,
+            lowPowerDefaults ? 1 : 4,
+            defaultOptions["option-num-cores"]
+        );
+        normalized["option-hashtable-ram"] = clampNumber(
+            normalized["option-hashtable-ram"],
+            16,
+            lowPowerDefaults ? 128 : 1024,
+            defaultOptions["option-hashtable-ram"]
+        );
+        normalized["option-depth"] = clampNumber(
+            normalized["option-depth"],
+            1,
+            lowPowerDefaults ? 8 : 30,
+            defaultOptions["option-depth"]
+        );
+        normalized["option-multipv"] = clampNumber(
+            normalized["option-multipv"],
+            1,
+            lowPowerDefaults ? 3 : 10,
+            defaultOptions["option-multipv"]
+        );
+        return normalized;
+    }
+
+    var currentOptions = normalizeOptions(Object.assign({}, defaultOptions, savedOptions));
 
     // ========================================================================
     // Mock Chrome Extension APIs
@@ -143,7 +204,7 @@
 
     // Function to update options from the settings panel
     window.updateChessMintOptions = function(newOptions) {
-        Object.assign(currentOptions, newOptions);
+        currentOptions = normalizeOptions(Object.assign({}, currentOptions, newOptions));
         try {
             localStorage.setItem('updatedchessmint_options', JSON.stringify(currentOptions));
         } catch(e) {}
@@ -153,6 +214,19 @@
     // Function to get current options
     window.getChessMintOptions = function() {
         return Object.assign({}, currentOptions);
+    };
+
+    window.restartChessMintEngineHandshake = function() {
+        try {
+            var mint = window.UpdatedChessMintmaster;
+            if (mint && mint.engine && typeof mint.engine.beginUciHandshake === 'function') {
+                mint.engine.beginUciHandshake();
+                return true;
+            }
+        } catch(e) {
+            console.warn('[UpdatedChessMint Android] Could not restart engine handshake', e);
+        }
+        return false;
     };
 
     // ========================================================================

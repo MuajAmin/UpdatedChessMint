@@ -150,14 +150,37 @@ var Config =
 var context = undefined;
 var eTable = null;
 
+function isLowPowerMintDevice() {
+  var profile =
+    (typeof window !== "undefined" && window.__UpdatedChessMintDeviceProfile) ||
+    {};
+  return (
+    profile.lowPower === true ||
+    profile.is64Bit === false ||
+    (Number(profile.maxMemoryMb) > 0 && Number(profile.maxMemoryMb) <= 192)
+  );
+}
+
+function getDefaultDepth() {
+  return isLowPowerMintDevice() ? 2 : 3;
+}
+
+function getDepthLimit() {
+  return isLowPowerMintDevice() ? 8 : 99;
+}
+
+function getDefaultMultiPV() {
+  return isLowPowerMintDevice() ? 1 : 3;
+}
+
 var defaultOptionValues = {};
 defaultOptionValues[enumOptions.UrlApiStockfish] = "native://engine";
 defaultOptionValues[enumOptions.ApiStockfish] = true;
 defaultOptionValues[enumOptions.NumCores] = 1;
-defaultOptionValues[enumOptions.HashtableRam] = 1024;
-defaultOptionValues[enumOptions.Depth] = 3;
+defaultOptionValues[enumOptions.HashtableRam] = isLowPowerMintDevice() ? 64 : 256;
+defaultOptionValues[enumOptions.Depth] = getDefaultDepth();
 defaultOptionValues[enumOptions.MateFinderValue] = 5;
-defaultOptionValues[enumOptions.MultiPV] = 3;
+defaultOptionValues[enumOptions.MultiPV] = getDefaultMultiPV();
 defaultOptionValues[enumOptions.HighMateChance] = false;
 defaultOptionValues[enumOptions.AutoMoveTime] = 0;
 defaultOptionValues[enumOptions.AutoMoveTimeRandom] = 10000;
@@ -268,7 +291,12 @@ function showMintToast(id, content, options) {
 }
 
 function getMultiPVLimit() {
-  return getIntegerConfig(enumOptions.MultiPV, 3, 1, 20);
+  return getIntegerConfig(
+    enumOptions.MultiPV,
+    getDefaultMultiPV(),
+    1,
+    isLowPowerMintDevice() ? 3 : 20
+  );
 }
 
 function isMoveAutomationAllowed() {
@@ -722,14 +750,18 @@ class StockfishEngine {
     this.stopTimeout = null;
     this.reconnectTimer = null;
     this.disposed = false;
+    this.resetEngineOptionDiscovery();
     this.reconnectDelay = 500;
     this.maxReconnectDelay = 3000;
     this.reconnectAttempts = 0;
     this.maxReconnectAttempts = 5;
-    this.depth = getIntegerConfig(enumOptions.Depth, 3, 1, 99);
+    this.depth = getIntegerConfig(
+      enumOptions.Depth,
+      getDefaultDepth(),
+      1,
+      getDepthLimit()
+    );
     this.options = {
-      // "Move Overhead": "",
-      "Slow Mover": "10",
       "MultiPV": getMultiPVLimit(),
     };
 
@@ -737,7 +769,14 @@ class StockfishEngine {
     if (!getBooleanConfig(enumOptions.ApiStockfish, true)) {
       let stockfishPathConfig = Config.threadedEnginePaths.stockfish;
       try {
-        new SharedArrayBuffer(getIntegerConfig(enumOptions.HashtableRam, 1024, 1, 1048576));
+        new SharedArrayBuffer(
+          getIntegerConfig(
+            enumOptions.HashtableRam,
+            isLowPowerMintDevice() ? 64 : 256,
+            1,
+            isLowPowerMintDevice() ? 128 : 1048576
+          )
+        );
         stockfishJsURL = `${stockfishPathConfig.multiThreaded.loader}#${stockfishPathConfig.multiThreaded.engine}`;
       } catch (e) {
         stockfishJsURL = `${stockfishPathConfig.singleThreaded.loader}#${stockfishPathConfig.singleThreaded.engine}`;
@@ -758,11 +797,7 @@ class StockfishEngine {
       this.stockfish.onmessage = (e) => {
         this.ProcessMessage(e);
       };
-      this.send("uci");
-      this.onReady(() => {
-        this.UpdateOptions();
-        this.send("ucinewgame");
-      });
+      this.beginUciHandshake();
     } catch (e) {
       this.lastError = e;
       reportMint("error", "Failed to load Stockfish worker.", e);
@@ -782,11 +817,7 @@ class StockfishEngine {
       this.stockfish.addEventListener("open", () => {
         reportMint("info", "Engine connection opened.");
         this.reconnectAttempts = 0;
-        this.send("uci");
-        this.onReady(() => {
-          this.UpdateOptions();
-          this.send("ucinewgame");
-        });
+        this.beginUciHandshake();
       });
 
       this.stockfish.addEventListener("message", (event) => {
@@ -962,10 +993,20 @@ class StockfishEngine {
     if (this.disposed) return;
     // Handle both null/undefined cases
     if (options == null) options = {};
-    this.depth = getIntegerConfig(enumOptions.Depth, 3, 1, 99);
+    this.depth = getIntegerConfig(
+      enumOptions.Depth,
+      getDefaultDepth(),
+      1,
+      getDepthLimit()
+    );
     this.options["MultiPV"] = getMultiPVLimit();
     this.options["Threads"] = getIntegerConfig(enumOptions.NumCores, 1, 1, 64);
-    this.options["Hash"] = getIntegerConfig(enumOptions.HashtableRam, 1024, 1, 1048576);
+    this.options["Hash"] = getIntegerConfig(
+      enumOptions.HashtableRam,
+      isLowPowerMintDevice() ? 64 : 256,
+      1,
+      isLowPowerMintDevice() ? 128 : 1048576
+    );
     this.UpdateOptions(this.options);
     if (this.topMoves.length > 0) this.onTopMoves(null, !this.isEvaluating);
   }
@@ -973,8 +1014,48 @@ class StockfishEngine {
   UpdateOptions(options = null) {
     if (options === null) options = this.options;
     Object.keys(options).forEach((key) => {
-      this.send(`setoption name ${key} value ${options[key]}`);
+      this.sendEngineOption(key, options[key]);
     });
+  }
+  resetEngineOptionDiscovery() {
+    this.supportedEngineOptions = new Set();
+    this.hasReceivedEngineOptions = false;
+    this.reportedUnsupportedEngineOptions = new Set();
+  }
+  beginUciHandshake() {
+    if (this.disposed) return;
+    this.resetEngineOptionDiscovery();
+    this.ready = false;
+    this.loaded = false;
+    this.send("uci");
+  }
+  normalizeEngineOptionName(name) {
+    return String(name || "").trim().toLowerCase();
+  }
+  registerEngineOption(line) {
+    let optionMatch = line.match(/^option name\s+(.+?)\s+type\s+/i);
+    if (!optionMatch) return false;
+    this.hasReceivedEngineOptions = true;
+    this.supportedEngineOptions.add(
+      this.normalizeEngineOptionName(optionMatch[1])
+    );
+    return true;
+  }
+  isEngineOptionSupported(key) {
+    if (!this.hasReceivedEngineOptions) return true;
+    return this.supportedEngineOptions.has(this.normalizeEngineOptionName(key));
+  }
+  sendEngineOption(key, value) {
+    if (value === undefined || value === null || value === "") return;
+    if (!this.isEngineOptionSupported(key)) {
+      let normalized = this.normalizeEngineOptionName(key);
+      if (!this.reportedUnsupportedEngineOptions.has(normalized)) {
+        this.reportedUnsupportedEngineOptions.add(normalized);
+        reportMint("info", `Skipped unsupported engine option: ${key}.`);
+      }
+      return;
+    }
+    this.send(`setoption name ${key} value ${value}`);
   }
   ProcessMessage(event) {
     if (this.disposed) return;
@@ -982,8 +1063,15 @@ class StockfishEngine {
     let line = event && typeof event === "object" ? event.data : event;
     if (typeof line !== "string" || line.length === 0) return;
 
+    if (this.registerEngineOption(line)) {
+      return;
+    }
+
     if (line === "uciok") {
       this.loaded = true;
+      this.UpdateOptions();
+      this.send("ucinewgame");
+      this.send("isready");
       this.UpdatedChessMintmaster.onEngineLoaded();
     } else if (line === "readyok") {
       this.ready = true;

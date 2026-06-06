@@ -9,6 +9,7 @@ let inputObjects = {
   "option-mate-finder-value": { default_value: 5 },
   "option-multipv": { default_value: 3 },
   "option-highmatechance": { default_value: false },
+  "option-limit-strength": { default_value: false },
   "option-auto-move-time": { default_value: 0 },
   "option-auto-move-time-random": { default_value: 10000 },
   "option-auto-move-time-random-div": { default_value: 10 },

@@ -109,10 +109,11 @@ class MainActivity : ComponentActivity() {
         var availableEngines by remember { mutableStateOf<List<ChessEngine>>(emptyList()) }
         var consoleLog by remember { mutableStateOf<List<String>>(emptyList()) }
         var pageLoaded by remember { mutableStateOf(false) }
+        val lowPowerMode = remember { isLowPowerAndroidDevice() }
 
         // Settings state
-        var depth by remember { mutableIntStateOf(3) }
-        var multiPV by remember { mutableIntStateOf(3) }
+        var depth by remember { mutableIntStateOf(defaultSearchDepth()) }
+        var multiPV by remember { mutableIntStateOf(defaultMultiPv()) }
         var showHints by remember { mutableStateOf(true) }
         var showEvalBar by remember { mutableStateOf(true) }
         var showDepthBar by remember { mutableStateOf(true) }
@@ -189,7 +190,7 @@ class MainActivity : ComponentActivity() {
                             setSupportMultipleWindows(false)
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                                 safeBrowsingEnabled = false
-                                offscreenPreRaster = true
+                                offscreenPreRaster = !isLowPowerAndroidDevice()
                             }
                             disableWebViewDarkening(this)
                         }
@@ -390,13 +391,16 @@ class MainActivity : ComponentActivity() {
                     showDepthBar = showDepthBar,
                     moveAnalysis = moveAnalysis,
                     autoMove = autoMove,
+                    lowPowerMode = lowPowerMode,
                     onDepthChange = { d ->
-                        depth = d
-                        updateOption(webView, "option-depth", d)
+                        val clampedDepth = clampDepthForDevice(d)
+                        depth = clampedDepth
+                        updateOption(webView, "option-depth", clampedDepth)
                     },
                     onMultiPVChange = { m ->
-                        multiPV = m
-                        updateOption(webView, "option-multipv", m)
+                        val clampedMultiPv = clampMultiPvForDevice(m)
+                        multiPV = clampedMultiPv
+                        updateOption(webView, "option-multipv", clampedMultiPv)
                     },
                     onShowHintsChange = { v ->
                         showHints = v
@@ -420,7 +424,7 @@ class MainActivity : ComponentActivity() {
                     },
                     onSelectEngine = { engine ->
                         engineScope.launch {
-                            startEngine(context, engine)
+                            startEngine(context, engine, webView)
                         }
                     },
                     onStopEngine = {
@@ -454,7 +458,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private suspend fun startEngine(context: Context, engine: ChessEngine) {
+    private suspend fun startEngine(context: Context, engine: ChessEngine, webView: WebView?) {
         withContext(Dispatchers.IO) {
             try {
                 val resolver = ChessEngineResolver(context)
@@ -462,6 +466,9 @@ class MainActivity : ComponentActivity() {
                 if (engineFile != null && engineFile.exists()) {
                     val started = engineProcess?.start(engineFile, engine.name) == true
                     withContext(Dispatchers.Main) {
+                        if (started) {
+                            restartEngineHandshake(webView)
+                        }
                         val message = if (started) {
                             "Engine started: ${engine.name}"
                         } else {
@@ -481,6 +488,13 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    private fun restartEngineHandshake(webView: WebView?) {
+        webView?.evaluateJavascript(
+            "if(window.restartChessMintEngineHandshake){window.restartChessMintEngineHandshake();}",
+            null
+        )
     }
 
     private fun isAllowedChessUrl(url: String?): Boolean {
@@ -508,6 +522,26 @@ class MainActivity : ComponentActivity() {
             "http", "https", "about", "blob", "data" -> false
             else -> true
         }
+    }
+
+    private fun isLowPowerAndroidDevice(): Boolean {
+        val runtime = Runtime.getRuntime()
+        val is32BitOnly = Build.SUPPORTED_64_BIT_ABIS.isEmpty() || !android.os.Process.is64Bit()
+        val lowHeap = runtime.maxMemory() <= 192L * 1024L * 1024L
+        val lowCpu = runtime.availableProcessors() <= 2
+        return is32BitOnly || lowHeap || lowCpu
+    }
+
+    private fun defaultSearchDepth(): Int = if (isLowPowerAndroidDevice()) 2 else 3
+
+    private fun defaultMultiPv(): Int = if (isLowPowerAndroidDevice()) 1 else 3
+
+    private fun clampDepthForDevice(value: Int): Int {
+        return value.coerceIn(1, if (isLowPowerAndroidDevice()) 8 else 30)
+    }
+
+    private fun clampMultiPvForDevice(value: Int): Int {
+        return value.coerceIn(1, if (isLowPowerAndroidDevice()) 3 else 10)
     }
 
     @Suppress("DEPRECATION")
@@ -591,6 +625,7 @@ fun ControlPanel(
     showDepthBar: Boolean,
     moveAnalysis: Boolean,
     autoMove: Boolean,
+    lowPowerMode: Boolean,
     onDepthChange: (Int) -> Unit,
     onMultiPVChange: (Int) -> Unit,
     onShowHintsChange: (Boolean) -> Unit,
@@ -602,6 +637,8 @@ fun ControlPanel(
     onStopEngine: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    val maxDepth = if (lowPowerMode) 8f else 30f
+    val maxMultiPv = if (lowPowerMode) 3f else 10f
     val panelGradient = Brush.verticalGradient(
         colors = listOf(
             DarkSurface.copy(alpha = 0.95f),
@@ -887,8 +924,8 @@ fun ControlPanel(
                                 Slider(
                                     value = depth.toFloat(),
                                     onValueChange = { onDepthChange(it.toInt()) },
-                                    valueRange = 1f..30f,
-                                    steps = 28,
+                                    valueRange = 1f..maxDepth,
+                                    steps = (maxDepth.toInt() - 2).coerceAtLeast(0),
                                     colors = SliderDefaults.colors(
                                         thumbColor = Color.White,
                                         activeTrackColor = AccentTeal,
@@ -939,8 +976,8 @@ fun ControlPanel(
                                 Slider(
                                     value = multiPV.toFloat(),
                                     onValueChange = { onMultiPVChange(it.toInt()) },
-                                    valueRange = 1f..10f,
-                                    steps = 8,
+                                    valueRange = 1f..maxMultiPv,
+                                    steps = (maxMultiPv.toInt() - 2).coerceAtLeast(0),
                                     colors = SliderDefaults.colors(
                                         thumbColor = Color.White,
                                         activeTrackColor = AccentPurple,
