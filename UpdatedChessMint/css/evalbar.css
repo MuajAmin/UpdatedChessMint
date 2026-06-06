@@ -1,30 +1,30 @@
 .board-layout-evaluation {
     display: flex;
-    grid-column: evaluation
+    grid-column: evaluation;
 }
 
 .board-layout-evaluation>* {
     margin-left: calc(var(--boardContainerWidth) - var(--boardWidth) - var(--gutterLeftOfBoard));
-    margin-right: calc(var(--gutterLeftOfBoard) + var(--boardWidth) - var(--boardContainerWidth))
+    margin-right: calc(var(--gutterLeftOfBoard) + var(--boardWidth) - var(--boardContainerWidth));
 }
 
 @media (min-width: 960px) {
     body.with-evaluation {
         --evalAndGutter: calc(var(--gutterLeftOfBoard) + var(--evalWidth));
-        --evalWidth: 2rem
+        --evalWidth: 2rem;
     }
 
     .board-layout-evaluation {
-        width: var(--evalWidth)
+        width: var(--evalWidth);
     }
 
     .board-layout-evaluation>* {
-        margin: 0 0 0 calc(var(--boardContainerWidth) - var(--boardWidth))
+        margin: 0 0 0 calc(var(--boardContainerWidth) - var(--boardWidth));
     }
 }
 
 .evaluation-bar-bar {
-    border-radius: .2rem;
+    border-radius: 6px;
     flex-shrink: 0;
     height: 100%;
     position: relative;
@@ -32,31 +32,34 @@
     -moz-user-select: none;
     -ms-user-select: none;
     user-select: none;
-    width: 20px
+    width: 22px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -2px rgba(0, 0, 0, 0.3);
+    overflow: hidden;
 }
 
 .evaluation-bar-bar.evaluation-bar-clickable {
-    cursor: pointer
+    cursor: pointer;
 }
 
 .evaluation-bar-bar.evaluation-bar-flipped,
 .evaluation-bar-bar.evaluation-bar-flipped .evaluation-bar-loader,
 .evaluation-bar-bar.evaluation-bar-flipped .evaluation-bar-scoreAbbreviated {
-    transform: rotate(180deg)
+    transform: rotate(180deg);
 }
 
 .evaluation-bar-bar.evaluation-bar-flipped .evaluation-bar-score {
-    --flipTransform: rotate(180deg)
+    --flipTransform: rotate(180deg);
 }
 
 .evaluation-bar-bar .evaluation-bar-fill {
-    background-color: hsla(0, 0%, 100%, .05);
-    border-radius: .2rem;
+    background-color: rgba(24, 24, 27, 0.8);
+    border-radius: 5px;
     height: 100%;
     overflow: hidden;
     position: relative;
     width: 100%;
-    z-index: -1
+    z-index: -1;
 }
 
 .evaluation-bar-bar .evaluation-bar-color {
@@ -64,32 +67,33 @@
     height: 100%;
     left: 0;
     position: absolute;
-    transition: transform 1s ease-in;
-    width: 100%
+    /* Redesigned snappy transition curve */
+    transition: transform 400ms cubic-bezier(0.2, 0.8, 0.2, 1);
+    width: 100%;
 }
 
 .evaluation-bar-bar .evaluation-bar-white {
-    background-color: #fff;
-    z-index: 2
+    background-color: #f8fafc; /* Premium warm/off-white */
+    z-index: 2;
 }
 
 .evaluation-bar-bar .evaluation-bar-black {
-    background-color: #403d39;
-    z-index: 1
+    background-color: #0f172a; /* Deep charcoal slate */
+    z-index: 1;
 }
 
 .evaluation-bar-bar .evaluation-bar-draw {
-    background-color: #777574;
-    z-index: 0
+    background-color: #64748b; /* Sleek medium gray */
+    z-index: 0;
 }
 
 .evaluation-bar-bar .evaluation-bar-loader {
     height: 100%;
-    width: 100%
+    width: 100%;
 }
 
 .evaluation-bar-bar .evaluation-bar-loading-message {
-    color: hsla(0, 0%, 100%, .6);
+    color: rgba(255, 255, 255, 0.6);
     font-size: 1.5rem;
     font-weight: 600;
     left: 50%;
@@ -101,13 +105,14 @@
     transform: translate3d(-50%, -50%, 0) rotate(180deg);
     -ms-writing-mode: tb-rl;
     writing-mode: vertical-rl;
-    z-index: 2
+    z-index: 2;
 }
 
 .evaluation-bar-bar .evaluation-bar-score {
     display: none;
-    font-size: 1.2rem;
-    font-weight: 600;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 1.15rem;
+    font-weight: 700;
     -webkit-hyphens: auto;
     -ms-hyphens: auto;
     hyphens: auto;
@@ -115,80 +120,84 @@
     position: absolute;
     text-align: center;
     width: 100%;
-    z-index: 2
+    z-index: 2;
+    text-shadow: 0 1px 1px rgba(0, 0, 0, 0.25);
 }
 
 .evaluation-bar-bar .evaluation-bar-score.evaluation-bar-dark {
     bottom: 0;
-    color: #403d39
+    color: #0f172a;
 }
 
 .evaluation-bar-bar .evaluation-bar-score.evaluation-bar-light {
-    color: #fff;
-    top: 0
+    color: #f8fafc;
+    top: 0;
 }
 
 .evaluation-bar-bar .evaluation-bar-score.evaluation-bar-draw {
-    color: #fff
+    color: #f8fafc;
 }
 
 .evaluation-bar-bar:hover .evaluation-bar-score {
-    border-radius: .3rem;
+    border-radius: 4px;
     bottom: auto;
     display: block;
-    font-weight: 700;
+    font-weight: 800;
     -webkit-hyphens: auto;
     -ms-hyphens: auto;
     hyphens: auto;
-    padding: .1rem .5rem;
+    padding: .2rem .6rem;
     position: absolute;
     text-align: center;
     top: 50%;
-    transform: translate(calc(10px - 50%), -50%) var(--flipTransform, rotate(0deg));
+    transform: translate(calc(12px - 50%), -50%) var(--flipTransform, rotate(0deg));
     transition: opacity .2s;
     transition-delay: .1s;
-    width: 45px;
-    z-index: 2
+    width: 50px;
+    z-index: 3;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
 }
 
 .evaluation-bar-bar:hover .evaluation-bar-score.evaluation-bar-dark {
-    background-color: #fff;
-    color: #403d39
+    background-color: #f8fafc;
+    color: #0f172a;
 }
 
 .evaluation-bar-bar:hover .evaluation-bar-score.evaluation-bar-light {
-    background-color: #403d39;
-    color: #fff
+    background-color: #0f172a;
+    color: #f8fafc;
 }
 
 .evaluation-bar-bar:hover .evaluation-bar-score-long {
     white-space: nowrap;
-    width: auto
+    width: auto;
 }
 
 .evaluation-bar-bar .evaluation-bar-scoreAbbreviated {
-    font-size: 1rem;
-    font-weight: 600;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 0.95rem;
+    font-weight: 700;
     padding: .5rem 0;
     position: absolute;
     text-align: center;
     white-space: pre;
     width: 100%;
-    z-index: 2
+    z-index: 2;
+    text-shadow: 0 1px 1px rgba(0, 0, 0, 0.2);
 }
 
 .evaluation-bar-bar .evaluation-bar-scoreAbbreviated.evaluation-bar-dark {
     bottom: 0;
-    color: #403d39
+    color: #0f172a;
 }
 
 .evaluation-bar-bar .evaluation-bar-scoreAbbreviated.evaluation-bar-light {
-    color: #fff;
-    top: 0
+    color: #f8fafc;
+    top: 0;
 }
 
 .evaluation-bar-bar .evaluation-bar-scoreAbbreviated.evaluation-bar-draw {
     background: transparent;
-    color: #fff;
-    top: calc(50% - 1rem)
+    color: #f8fafc;
+    top: calc(50% - 1rem);
 }

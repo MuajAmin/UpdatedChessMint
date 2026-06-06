@@ -1,31 +1,37 @@
 .depthBarLayoutt {
     display: grid;
     grid-template-columns: [evaluation] var(--evalAndGutter) [pieces] var(--piecesWidth) [board] var(--boardContainerWidth) [board-controls] var(--boardControlsWidth);
-    margin: -5px 0 5px auto;
+    margin: -4px 0 6px auto;
     position: relative;
 }
 
 .depthBarLayoutt .depthBarr {
     grid-column: board;
-    height: 5px !important;
+    height: 6px !important;
     width: var(--boardWidth) !important;
     display: block;
     margin-left: calc(var(--boardContainerWidth) - var(--boardWidth));
     position: relative;
-    background: #403d39;
+    background: rgba(24, 24, 27, 0.6) !important;
+    border-radius: 3px;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5);
 }
 
 .depthBarr .depthBarProgress {
     display: block;
     height: 100%;
     width: 0%;
-    background-color: #5d3fd3;
+    background: linear-gradient(90deg, #00f5ff 0%, #8f39fd 100%) !important;
     position: relative;
     overflow: hidden;
     font-size: 15px;
     text-align: center;
     color: white;
-    transition: all 100ms ease;
+    border-radius: 3px;
+    box-shadow: 0 0 8px rgba(143, 57, 253, 0.6);
+    transition: width 150ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .disable-transition {

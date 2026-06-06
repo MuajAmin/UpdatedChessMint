@@ -159,20 +159,24 @@
     // Native Engine Bridge (replacing WebSocket)
     // ========================================================================
 
-    // This function is called by the native Kotlin code when the engine sends a response
+    var nativeEngineSockets = window.__UpdatedChessMintNativeSockets || [];
+    window.__UpdatedChessMintNativeSockets = nativeEngineSockets;
+
+    // This function is called by the native Kotlin code when the engine sends a response.
     window.onEngineResponse = function(line) {
-        if (window._engineMessageHandler) {
-            window._engineMessageHandler(line);
-        }
+        nativeEngineSockets.slice().forEach(function(socket) {
+            socket._emitMessage(line);
+        });
     };
 
     // Override WebSocket to intercept engine connections
-    var OriginalWebSocket = window.WebSocket;
+    var OriginalWebSocket = window.__UpdatedChessMintOriginalWebSocket || window.WebSocket;
+    window.__UpdatedChessMintOriginalWebSocket = OriginalWebSocket;
     window.WebSocket = function(url, protocols) {
         // Check if this is a chess engine connection
         if (url && (url.indexOf('localhost:8000') !== -1 || url.indexOf('native://') !== -1)) {
             console.log('[UpdatedChessMint Android] Intercepting WebSocket -> Native Engine Bridge');
-            return new NativeEngineBridge();
+            return new NativeEngineBridge(url, protocols);
         }
         // For all other WebSocket connections, use the original
         return new OriginalWebSocket(url, protocols);
@@ -186,7 +190,12 @@
     /**
      * NativeEngineBridge - A fake WebSocket that routes to the native Android engine.
      */
-    function NativeEngineBridge() {
+    function NativeEngineBridge(url, protocols) {
+        this.url = url || "native://engine";
+        this.protocol = Array.isArray(protocols) ? (protocols[0] || "") : (protocols || "");
+        this.extensions = "";
+        this.bufferedAmount = 0;
+        this.binaryType = "blob";
         this.readyState = WebSocket.CONNECTING;
         this.onopen = null;
         this.onmessage = null;
@@ -195,31 +204,21 @@
         this._listeners = {};
 
         var self = this;
-
-        // Register the message handler for engine responses
-        window._engineMessageHandler = function(line) {
-            if (self.readyState !== WebSocket.OPEN) return;
-            
-            var event = { data: line };
-            
-            // Call event listeners
-            if (self.onmessage) self.onmessage(event);
-            if (self._listeners['message']) {
-                self._listeners['message'].forEach(function(fn) { fn(event); });
-            }
-        };
+        nativeEngineSockets.push(this);
 
         // Simulate connection opening (async to match WebSocket behavior)
         setTimeout(function() {
+            if (self.readyState !== WebSocket.CONNECTING) return;
             self.readyState = WebSocket.OPEN;
-            var openEvent = {};
-            if (self.onopen) self.onopen(openEvent);
-            if (self._listeners['open']) {
-                self._listeners['open'].forEach(function(fn) { fn(openEvent); });
-            }
+            self.dispatchEvent({ type: 'open' });
             console.log('[UpdatedChessMint Android] Native engine bridge connected');
         }, 50);
     }
+
+    NativeEngineBridge.prototype._emitMessage = function(line) {
+        if (this.readyState !== WebSocket.OPEN) return;
+        this.dispatchEvent({ type: 'message', data: line });
+    };
 
     NativeEngineBridge.prototype.send = function(data) {
         if (this.readyState !== WebSocket.OPEN) {
@@ -234,12 +233,11 @@
     };
 
     NativeEngineBridge.prototype.close = function() {
+        if (this.readyState === WebSocket.CLOSED) return;
         this.readyState = WebSocket.CLOSED;
-        var event = {};
-        if (this.onclose) this.onclose(event);
-        if (this._listeners['close']) {
-            this._listeners['close'].forEach(function(fn) { fn(event); });
-        }
+        var index = nativeEngineSockets.indexOf(this);
+        if (index !== -1) nativeEngineSockets.splice(index, 1);
+        this.dispatchEvent({ type: 'close', code: 1000, reason: '', wasClean: true });
     };
 
     NativeEngineBridge.prototype.addEventListener = function(type, fn) {
@@ -250,6 +248,18 @@
     NativeEngineBridge.prototype.removeEventListener = function(type, fn) {
         if (!this._listeners[type]) return;
         this._listeners[type] = this._listeners[type].filter(function(f) { return f !== fn; });
+    };
+
+    NativeEngineBridge.prototype.dispatchEvent = function(event) {
+        if (!event || !event.type) return true;
+        var handler = this['on' + event.type];
+        if (typeof handler === 'function') handler.call(this, event);
+        if (this._listeners[event.type]) {
+            this._listeners[event.type].slice().forEach(function(fn) {
+                if (typeof fn === 'function') fn.call(this, event);
+            }, this);
+        }
+        return true;
     };
 
     console.log('[UpdatedChessMint Android] Adapter loaded successfully');

@@ -1,4 +1,3 @@
-import os
 import sys
 import subprocess
 import asyncio
@@ -10,7 +9,6 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.websockets import WebSocketState
-import time
 from contextlib import asynccontextmanager
 
 # Helper function to show progress messages

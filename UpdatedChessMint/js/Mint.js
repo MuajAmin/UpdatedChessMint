@@ -1369,22 +1369,82 @@ function InitUpdatedChessMint(chessboard) {
   });
 }
 
-const observer = new MutationObserver(async function (mutations) {
-  mutations.forEach(async function (mutation) {
-    mutation.addedNodes.forEach(async function (node) {
+var updatedChessMintInitStarted = false;
+var updatedChessMintBoardObserver = null;
+
+function isUpdatedChessMintBoard(node) {
+  if (!node || node.nodeType !== Node.ELEMENT_NODE || !node.tagName) return false;
+  var tagName = node.tagName.toUpperCase();
+  return tagName === "WC-CHESS-BOARD" || tagName === "CHESS-BOARD";
+}
+
+function hasChessComGameController(board) {
+  return !!(
+    board &&
+    board.game &&
+    typeof board.game.on === "function" &&
+    typeof board.game.getFEN === "function" &&
+    typeof board.game.getOptions === "function"
+  );
+}
+
+function tryInitUpdatedChessMint(board, attemptsLeft) {
+  if (updatedChessMintInitStarted || !board) return;
+
+  if (hasChessComGameController(board)) {
+    updatedChessMintInitStarted = true;
+    InitUpdatedChessMint(board);
+    if (updatedChessMintBoardObserver) {
+      updatedChessMintBoardObserver.disconnect();
+      updatedChessMintBoardObserver = null;
+    }
+    return;
+  }
+
+  if (attemptsLeft > 0) {
+    setTimeout(function () {
+      tryInitUpdatedChessMint(board, attemptsLeft - 1);
+    }, 250);
+  }
+}
+
+function findUpdatedChessMintBoards(root) {
+  var boards = [];
+  if (!root) return boards;
+
+  if (isUpdatedChessMintBoard(root)) {
+    boards.push(root);
+  }
+
+  if (root.querySelectorAll) {
+    root.querySelectorAll("wc-chess-board, chess-board").forEach(function (board) {
+      boards.push(board);
+    });
+  }
+
+  return boards;
+}
+
+function scanForUpdatedChessMintBoard(root) {
+  findUpdatedChessMintBoards(root).some(function (board) {
+    tryInitUpdatedChessMint(board, 40);
+    return updatedChessMintInitStarted;
+  });
+}
+
+scanForUpdatedChessMintBoard(document);
+
+updatedChessMintBoardObserver = new MutationObserver(function (mutations) {
+  mutations.forEach(function (mutation) {
+    mutation.addedNodes.forEach(function (node) {
       if (node.nodeType === Node.ELEMENT_NODE) {
-        if (node.tagName == "WC-CHESS-BOARD" || node.tagName == "CHESS-BOARD") {
-          if (Object.hasOwn(node, "game")) {
-            InitUpdatedChessMint(node);
-            observer.disconnect();
-          }
-        }
+        scanForUpdatedChessMintBoard(node);
       }
-    })
-  })
+    });
+  });
 });
 
-observer.observe(document, {
+updatedChessMintBoardObserver.observe(document.documentElement || document, {
   childList: true,
   subtree: true
 });

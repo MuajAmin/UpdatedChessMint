@@ -30,11 +30,14 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -42,13 +45,17 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.webkit.WebSettingsCompat
+import androidx.webkit.WebViewFeature
 import com.example.updatedchessmint.bridge.ChessMintBridge
 import com.example.updatedchessmint.engine.ChessEngine
 import com.example.updatedchessmint.engine.ChessEngineResolver
 import com.example.updatedchessmint.engine.EngineProcess
-import com.example.updatedchessmint.theme.UpdatedChessMintTheme
+import com.example.updatedchessmint.theme.*
+import androidx.compose.animation.core.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collectLatest
+import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.util.Locale
@@ -94,6 +101,7 @@ class MainActivity : ComponentActivity() {
     @Composable
     fun ChessMintApp() {
         val context = LocalContext.current
+        val engine = remember { EngineProcess(engineScope) }
         var showControlPanel by remember { mutableStateOf(false) }
         var webView by remember { mutableStateOf<WebView?>(null) }
         var engineRunning by remember { mutableStateOf(false) }
@@ -111,6 +119,16 @@ class MainActivity : ComponentActivity() {
         var moveAnalysis by remember { mutableStateOf(true) }
         var autoMove by remember { mutableStateOf(false) }
 
+        DisposableEffect(engine) {
+            engineProcess = engine
+            onDispose {
+                engine.stop()
+                if (engineProcess === engine) {
+                    engineProcess = null
+                }
+            }
+        }
+
         // Discover engines
         LaunchedEffect(Unit) {
             val engines = withContext(Dispatchers.IO) {
@@ -121,25 +139,23 @@ class MainActivity : ComponentActivity() {
         }
 
         // Collect engine state
-        LaunchedEffect(engineProcess) {
-            engineProcess?.let { ep ->
-                launch {
-                    ep.isRunning.collectLatest { running ->
-                        engineRunning = running
-                    }
+        LaunchedEffect(engine) {
+            launch {
+                engine.isRunning.collectLatest { running ->
+                    engineRunning = running
                 }
-                launch {
-                    ep.engineName.collectLatest { name ->
-                        currentEngineName = name
-                    }
+            }
+            launch {
+                engine.engineName.collectLatest { name ->
+                    currentEngineName = name
                 }
-                launch {
-                    ep.outputFlow.collectLatest { line ->
-                        // Send engine output to the WebView
-                        bridge?.sendToJavaScript(line)
-                        // Add to console log (keep last 50 lines)
-                        consoleLog = (consoleLog + line).takeLast(50)
-                    }
+            }
+            launch {
+                engine.outputFlow.collectLatest { line ->
+                    // Send engine output to the WebView
+                    bridge?.sendToJavaScript(line)
+                    // Add to console log (keep last 50 lines)
+                    consoleLog = (consoleLog + line).takeLast(50)
                 }
             }
         }
@@ -155,7 +171,7 @@ class MainActivity : ComponentActivity() {
                             domStorageEnabled = true
                             allowFileAccess = false
                             allowContentAccess = false
-                            mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                            mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
                             useWideViewPort = true
                             loadWithOverviewMode = true
                             builtInZoomControls = true
@@ -169,26 +185,24 @@ class MainActivity : ComponentActivity() {
                             userAgentString = settings.userAgentString.replace(
                                 "; wv", ""
                             ) // Remove WebView indicator from UA
-                            cacheMode = WebSettings.LOAD_CACHE_ELSE_NETWORK
+                            cacheMode = WebSettings.LOAD_DEFAULT
                             setSupportMultipleWindows(false)
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                                 safeBrowsingEnabled = false
                                 offscreenPreRaster = true
                             }
+                            disableWebViewDarkening(this)
                         }
 
-                        // GPU hardware layer for faster rendering
-                        setLayerType(View.LAYER_TYPE_HARDWARE, null)
+                        // The default layer avoids black WebView surfaces on some Android GPU/WebView builds.
+                        setLayerType(View.LAYER_TYPE_NONE, null)
+                        setBackgroundColor(android.graphics.Color.WHITE)
 
                         CookieManager.getInstance().setAcceptCookie(true)
                         CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
 
-                        // Create the engine process
-                        val ep = EngineProcess(engineScope)
-                        engineProcess = ep
-
                         // Create the bridge
-                        val b = ChessMintBridge(this, ep) { showControlPanel = true }
+                        val b = ChessMintBridge(this, engine) { showControlPanel = true }
                         bridge = b
                         addJavascriptInterface(b, ChessMintBridge.BRIDGE_NAME)
 
@@ -216,6 +230,13 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
 
+                            override fun onPageCommitVisible(view: WebView?, url: String?) {
+                                super.onPageCommitVisible(view, url)
+                                if (isWebUrl(url)) {
+                                    pageLoaded = true
+                                }
+                            }
+
                             override fun onPageFinished(view: WebView?, url: String?) {
                                 super.onPageFinished(view, url)
                                 if (isWebUrl(url)) {
@@ -238,19 +259,27 @@ class MainActivity : ComponentActivity() {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(Color(0xFF0D0D0D)),
+                        .background(DarkBackground),
                     contentAlignment = Alignment.Center
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         CircularProgressIndicator(
-                            color = Color(0xFF7C4DFF),
-                            strokeWidth = 3.dp
+                            color = AccentPurple,
+                            strokeWidth = 3.dp,
+                            modifier = Modifier.size(48.dp)
                         )
-                        Spacer(modifier = Modifier.height(16.dp))
+                        Spacer(modifier = Modifier.height(20.dp))
                         Text(
                             "Loading Chess.com...",
-                            color = Color.White.copy(alpha = 0.7f),
-                            fontSize = 14.sp
+                            color = TextPrimary,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            "Preparing assistant engine",
+                            color = TextSecondary,
+                            fontSize = 12.sp
                         )
                     }
                 }
@@ -258,35 +287,88 @@ class MainActivity : ComponentActivity() {
 
             // Floating Action Button - Control Panel Toggle
             if (pageLoaded) {
-                FloatingActionButton(
-                    onClick = { showControlPanel = !showControlPanel },
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(16.dp)
-                        .size(48.dp),
-                    containerColor = if (engineRunning) Color(0xFF7C4DFF) else Color(0xFF2C2C2E),
-                    contentColor = Color.White,
-                    shape = CircleShape,
-                    elevation = FloatingActionButtonDefaults.elevation(8.dp)
-                ) {
-                    Icon(
-                        imageVector = if (showControlPanel) Icons.Default.Close else Icons.Default.Settings,
-                        contentDescription = "Toggle Control Panel",
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
+                val infiniteTransition = rememberInfiniteTransition(label = "fabPulse")
+                val pulseScale by infiniteTransition.animateFloat(
+                    initialValue = 1f,
+                    targetValue = if (engineRunning) 1.25f else 1f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(1400, easing = FastOutSlowInEasing),
+                        repeatMode = RepeatMode.Reverse
+                    ),
+                    label = "pulseScale"
+                )
+                val pulseAlpha by infiniteTransition.animateFloat(
+                    initialValue = 0.5f,
+                    targetValue = 0f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(1400, easing = FastOutSlowInEasing),
+                        repeatMode = RepeatMode.Reverse
+                    ),
+                    label = "pulseAlpha"
+                )
 
-                // Engine status indicator
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
-                        .padding(end = 16.dp, bottom = 68.dp)
-                        .size(12.dp)
-                        .clip(CircleShape)
-                        .background(
-                            if (engineRunning) Color(0xFF00E676) else Color(0xFFFF5252)
+                        .padding(16.dp)
+                        .size(54.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    // Pulsing Glow Ring behind FAB
+                    if (engineRunning) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .scale(pulseScale)
+                                .alpha(pulseAlpha)
+                                .clip(CircleShape)
+                                .background(AccentGreen)
                         )
-                )
+                    }
+
+                    // Main FAB
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (engineRunning) {
+                                    Brush.verticalGradient(
+                                        colors = listOf(AccentPurple, Color(0xFF673AB7))
+                                    )
+                                } else {
+                                    Brush.verticalGradient(
+                                        colors = listOf(Color(0xFF27272A), Color(0xFF18181B))
+                                    )
+                                }
+                            )
+                            .border(
+                                width = 1.dp,
+                                color = if (engineRunning) AccentGreen.copy(alpha = 0.6f) else GlassBorder,
+                                shape = CircleShape
+                            )
+                            .clickable { showControlPanel = !showControlPanel },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = if (showControlPanel) Icons.Default.Close else Icons.Default.Settings,
+                            contentDescription = "Toggle Control Panel",
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
+                    // Integrated status badge
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(top = 1.dp, end = 1.dp)
+                            .size(10.dp)
+                            .clip(CircleShape)
+                            .background(if (engineRunning) AccentGreen else AccentRed)
+                            .border(1.dp, DarkBackground, CircleShape)
+                    )
+                }
             }
 
             // Bottom Sheet Control Panel
@@ -351,10 +433,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun updateOption(webView: WebView?, key: String, value: Any) {
+        val jsKey = JSONObject.quote(key)
         val jsValue = when (value) {
             is Boolean -> value.toString()
             is Int -> value.toString()
-            is String -> "'$value'"
+            is String -> JSONObject.quote(value)
             else -> value.toString()
         }
         webView?.post {
@@ -362,7 +445,7 @@ class MainActivity : ComponentActivity() {
                 """
                 (function() {
                     var opts = window.getChessMintOptions ? window.getChessMintOptions() : {};
-                    opts['$key'] = $jsValue;
+                    opts[$jsKey] = $jsValue;
                     if (window.updateChessMintOptions) window.updateChessMintOptions(opts);
                 })();
                 """.trimIndent(),
@@ -427,9 +510,24 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // Cached combined script — built once, reused on every page load
+    @Suppress("DEPRECATION")
+    private fun disableWebViewDarkening(settings: WebSettings) {
+        when {
+            WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING) -> {
+                WebSettingsCompat.setAlgorithmicDarkeningAllowed(settings, false)
+            }
+            WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK) -> {
+                WebSettingsCompat.setForceDark(settings, WebSettingsCompat.FORCE_DARK_OFF)
+            }
+        }
+    }
+
+    // Cached combined script - built once, reused on every page load
     private fun getCombinedScript(context: Context): String {
         return cachedCombinedScript ?: buildString {
+            append("(function(){'use strict';")
+            append("if(window.__UpdatedChessMintAndroidInjected){console.log('[UpdatedChessMint Android] Scripts already injected');return;}")
+            append("window.__UpdatedChessMintAndroidInjected=true;try{\n")
             append(loadAsset(context, "js/MintJsAdapter.js"))
             append(";\n")
             val depthBarCss = loadAsset(context, "css/depthbar.css").escapeForJs()
@@ -443,6 +541,7 @@ class MainActivity : ComponentActivity() {
             append(materialIconCss)
             append("');})();\n")
             append(loadAsset(context, "js/Mint.js"))
+            append("\n}catch(e){window.__UpdatedChessMintAndroidInjected=false;console.error('[UpdatedChessMint Android] Injection failed', e);}})();")
         }.also { cachedCombinedScript = it }
     }
 
@@ -505,8 +604,8 @@ fun ControlPanel(
 ) {
     val panelGradient = Brush.verticalGradient(
         colors = listOf(
-            Color(0xE6161618),
-            Color(0xF20D0D0F)
+            DarkSurface.copy(alpha = 0.95f),
+            DarkBackground.copy(alpha = 0.98f)
         )
     )
 
@@ -528,7 +627,7 @@ fun ControlPanel(
                     .padding(horizontal = 20.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Handle bar
+                // Drag handle bar
                 item {
                     Box(
                         modifier = Modifier.fillMaxWidth(),
@@ -539,92 +638,133 @@ fun ControlPanel(
                                 .width(40.dp)
                                 .height(4.dp)
                                 .clip(RoundedCornerShape(2.dp))
-                                .background(Color.White.copy(alpha = 0.3f))
+                                .background(Color.White.copy(alpha = 0.15f))
                         )
                     }
                 }
 
-                // Title
+                // Title Header
                 item {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            "UpdatedChessMint",
-                            color = Color.White,
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        IconButton(onClick = onDismiss) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                "CHESS",
+                                color = Color.White,
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                letterSpacing = 0.5.sp
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(AccentPurple.copy(alpha = 0.15f))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    "MINT",
+                                    color = AccentPurple,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 1.sp
+                                )
+                            }
+                        }
+                        IconButton(
+                            onClick = onDismiss,
+                            modifier = Modifier
+                                .size(32.dp)
+                                .background(Color.White.copy(alpha = 0.04f), CircleShape)
+                        ) {
                             Icon(
                                 Icons.Default.Close,
                                 contentDescription = "Close",
-                                tint = Color.White.copy(alpha = 0.6f)
+                                tint = TextSecondary,
+                                modifier = Modifier.size(16.dp)
                             )
                         }
                     }
                 }
 
-                // Engine Status
+                // Engine status hero card
                 item {
                     GlassCard {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(14.dp),
+                                .padding(16.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
+                                val infiniteTransition = rememberInfiniteTransition(label = "statusPulse")
+                                val pulseAlpha by infiniteTransition.animateFloat(
+                                    initialValue = 0.4f,
+                                    targetValue = 1f,
+                                    animationSpec = infiniteRepeatable(
+                                        animation = tween(1000, easing = LinearEasing),
+                                        repeatMode = RepeatMode.Reverse
+                                    ),
+                                    label = "statusAlpha"
+                                )
                                 Box(
                                     modifier = Modifier
-                                        .size(10.dp)
+                                        .size(8.dp)
+                                        .alpha(if (engineRunning) pulseAlpha else 1.0f)
                                         .clip(CircleShape)
-                                        .background(
-                                            if (engineRunning) Color(0xFF00E676) else Color(0xFFFF5252)
-                                        )
+                                        .background(if (engineRunning) AccentGreen else AccentRed)
                                 )
-                                Spacer(modifier = Modifier.width(10.dp))
+                                Spacer(modifier = Modifier.width(12.dp))
                                 Column {
                                     Text(
                                         currentEngineName,
-                                        color = Color.White,
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.SemiBold
+                                        color = TextPrimary,
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.Bold
                                     )
                                     Text(
-                                        if (engineRunning) "Active" else "Inactive",
-                                        color = Color.White.copy(alpha = 0.5f),
-                                        fontSize = 11.sp
+                                        if (engineRunning) "Engine Active - OEX" else "Engine Stopped - Inactive",
+                                        color = if (engineRunning) AccentGreen.copy(alpha = 0.8f) else TextSecondary,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium
                                     )
                                 }
                             }
 
                             if (engineRunning) {
-                                TextButton(
+                                Button(
                                     onClick = onStopEngine,
-                                    colors = ButtonDefaults.textButtonColors(
-                                        contentColor = Color(0xFFFF5252)
-                                    )
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = AccentRed.copy(alpha = 0.15f),
+                                        contentColor = AccentRed
+                                    ),
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                                    modifier = Modifier
+                                        .height(32.dp)
+                                        .border(0.5.dp, AccentRed.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
                                 ) {
-                                    Text("Stop", fontSize = 12.sp)
+                                    Text("Stop", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
                     }
                 }
 
-                // Engine Selector
+                // Available Engines list
                 if (availableEngines.isNotEmpty()) {
                     item {
                         Text(
-                            "Available Engines",
-                            color = Color.White.copy(alpha = 0.7f),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium,
-                            modifier = Modifier.padding(start = 4.dp)
+                            "AVAILABLE ENGINES",
+                            color = TextSecondary,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.5.sp,
+                            modifier = Modifier.padding(start = 4.dp, top = 4.dp)
                         )
                     }
 
@@ -638,23 +778,31 @@ fun ControlPanel(
                                     .padding(12.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(
-                                    Icons.Default.PlayArrow,
-                                    contentDescription = "Start",
-                                    tint = Color(0xFF7C4DFF),
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Spacer(modifier = Modifier.width(10.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(AccentPurple.copy(alpha = 0.10f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        Icons.Default.PlayArrow,
+                                        contentDescription = "Start Engine",
+                                        tint = AccentPurple,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
                                 Column {
                                     Text(
                                         engine.name,
-                                        color = Color.White,
+                                        color = TextPrimary,
                                         fontSize = 13.sp,
-                                        fontWeight = FontWeight.Medium
+                                        fontWeight = FontWeight.SemiBold
                                     )
                                     Text(
                                         engine.packageName,
-                                        color = Color.White.copy(alpha = 0.4f),
+                                        color = TextSecondary,
                                         fontSize = 10.sp
                                     )
                                 }
@@ -672,15 +820,16 @@ fun ControlPanel(
                             ) {
                                 Text(
                                     "No OEX Engines Found",
-                                    color = Color.White.copy(alpha = 0.7f),
+                                    color = TextPrimary,
                                     fontSize = 13.sp,
-                                    fontWeight = FontWeight.Medium
+                                    fontWeight = FontWeight.Bold
                                 )
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
-                                    "Install a chess engine app (e.g., Stockfish OEX) from the Play Store",
-                                    color = Color.White.copy(alpha = 0.4f),
-                                    fontSize = 11.sp
+                                    "Install a chess engine app (e.g. Stockfish OEX) from the Play Store",
+                                    color = TextSecondary,
+                                    fontSize = 11.sp,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
                                 )
                             }
                         }
@@ -690,72 +839,118 @@ fun ControlPanel(
                 // Settings Section
                 item {
                     Text(
-                        "Settings",
-                        color = Color.White.copy(alpha = 0.7f),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium,
+                        "ENGINE SETTINGS",
+                        color = TextSecondary,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.5.sp,
                         modifier = Modifier.padding(start = 4.dp, top = 4.dp)
                     )
                 }
 
-                // Depth slider
+                // Sliders card
                 item {
                     GlassCard {
-                        Column(modifier = Modifier.padding(14.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text("Depth", color = Color.White, fontSize = 13.sp)
-                                Text(
-                                    "$depth",
-                                    color = Color(0xFF7C4DFF),
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            // Depth slider
+                            Column {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            Icons.Default.Info,
+                                            contentDescription = "Depth",
+                                            tint = AccentTeal,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Search Depth", color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                                    }
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(AccentTeal.copy(alpha = 0.1f))
+                                            .padding(horizontal = 8.dp, vertical = 2.dp)
+                                    ) {
+                                        Text(
+                                            "$depth",
+                                            color = AccentTeal,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Slider(
+                                    value = depth.toFloat(),
+                                    onValueChange = { onDepthChange(it.toInt()) },
+                                    valueRange = 1f..30f,
+                                    steps = 28,
+                                    colors = SliderDefaults.colors(
+                                        thumbColor = Color.White,
+                                        activeTrackColor = AccentTeal,
+                                        inactiveTrackColor = Color.White.copy(alpha = 0.06f),
+                                        activeTickColor = Color.Transparent,
+                                        inactiveTickColor = Color.Transparent
+                                    ),
+                                    modifier = Modifier.height(32.dp)
                                 )
                             }
-                            Slider(
-                                value = depth.toFloat(),
-                                onValueChange = { onDepthChange(it.toInt()) },
-                                valueRange = 1f..30f,
-                                steps = 28,
-                                colors = SliderDefaults.colors(
-                                    thumbColor = Color(0xFF7C4DFF),
-                                    activeTrackColor = Color(0xFF7C4DFF),
-                                    inactiveTrackColor = Color.White.copy(alpha = 0.1f)
-                                )
-                            )
-                        }
-                    }
-                }
 
-                // MultiPV slider
-                item {
-                    GlassCard {
-                        Column(modifier = Modifier.padding(14.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text("Multi PV", color = Color.White, fontSize = 13.sp)
-                                Text(
-                                    "$multiPV",
-                                    color = Color(0xFF7C4DFF),
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold
+                            Spacer(modifier = Modifier.height(14.dp))
+                            HorizontalDivider(color = Color.White.copy(alpha = 0.05f))
+                            Spacer(modifier = Modifier.height(14.dp))
+
+                            // MultiPV slider
+                            Column {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            Icons.AutoMirrored.Filled.List,
+                                            contentDescription = "MultiPV",
+                                            tint = AccentPurple,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Parallel Lines (MultiPV)", color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                                    }
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(AccentPurple.copy(alpha = 0.1f))
+                                            .padding(horizontal = 8.dp, vertical = 2.dp)
+                                    ) {
+                                        Text(
+                                            "$multiPV",
+                                            color = AccentPurple,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Slider(
+                                    value = multiPV.toFloat(),
+                                    onValueChange = { onMultiPVChange(it.toInt()) },
+                                    valueRange = 1f..10f,
+                                    steps = 8,
+                                    colors = SliderDefaults.colors(
+                                        thumbColor = Color.White,
+                                        activeTrackColor = AccentPurple,
+                                        inactiveTrackColor = Color.White.copy(alpha = 0.06f),
+                                        activeTickColor = Color.Transparent,
+                                        inactiveTickColor = Color.Transparent
+                                    ),
+                                    modifier = Modifier.height(32.dp)
                                 )
                             }
-                            Slider(
-                                value = multiPV.toFloat(),
-                                onValueChange = { onMultiPVChange(it.toInt()) },
-                                valueRange = 1f..10f,
-                                steps = 8,
-                                colors = SliderDefaults.colors(
-                                    thumbColor = Color(0xFF7C4DFF),
-                                    activeTrackColor = Color(0xFF7C4DFF),
-                                    inactiveTrackColor = Color.White.copy(alpha = 0.1f)
-                                )
-                            )
                         }
                     }
                 }
@@ -763,16 +958,16 @@ fun ControlPanel(
                 // Toggle switches
                 item {
                     GlassCard {
-                        Column(modifier = Modifier.padding(14.dp)) {
-                            SettingsToggle("Show Hints", showHints, onShowHintsChange)
+                        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)) {
+                            SettingsToggle("Show Hints", Icons.Default.Info, AccentTeal, showHints, onShowHintsChange)
                             HorizontalDivider(color = Color.White.copy(alpha = 0.05f))
-                            SettingsToggle("Evaluation Bar", showEvalBar, onShowEvalBarChange)
+                            SettingsToggle("Evaluation Bar", Icons.Default.Star, AccentPurple, showEvalBar, onShowEvalBarChange)
                             HorizontalDivider(color = Color.White.copy(alpha = 0.05f))
-                            SettingsToggle("Depth Bar", showDepthBar, onShowDepthBarChange)
+                            SettingsToggle("Depth Bar", Icons.Default.PlayArrow, AccentTeal, showDepthBar, onShowDepthBarChange)
                             HorizontalDivider(color = Color.White.copy(alpha = 0.05f))
-                            SettingsToggle("Move Analysis", moveAnalysis, onMoveAnalysisChange)
+                            SettingsToggle("Move Analysis", Icons.Default.Build, AccentPurple, moveAnalysis, onMoveAnalysisChange)
                             HorizontalDivider(color = Color.White.copy(alpha = 0.05f))
-                            SettingsToggle("Auto Move", autoMove, onAutoMoveChange)
+                            SettingsToggle("Auto Move", Icons.Default.CheckCircle, AccentGreen, autoMove, onAutoMoveChange)
                         }
                     }
                 }
@@ -781,29 +976,79 @@ fun ControlPanel(
                 if (consoleLog.isNotEmpty()) {
                     item {
                         Text(
-                            "Engine Console",
-                            color = Color.White.copy(alpha = 0.7f),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium,
+                            "CONSOLE MONITOR",
+                            color = TextSecondary,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.5.sp,
                             modifier = Modifier.padding(start = 4.dp, top = 4.dp)
                         )
                     }
                     item {
-                        GlassCard {
-                            Column(
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(14.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF0C0C0E))
+                        ) {
+                            Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .heightIn(max = 120.dp)
-                                    .padding(10.dp)
-                            ) {
-                                consoleLog.takeLast(8).forEach { line ->
-                                    Text(
-                                        line,
-                                        color = Color(0xFF00E676).copy(alpha = 0.8f),
-                                        fontSize = 9.sp,
-                                        maxLines = 1,
-                                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                                    .border(
+                                        width = 0.5.dp,
+                                        color = AccentGreen.copy(alpha = 0.15f),
+                                        shape = RoundedCornerShape(14.dp)
                                     )
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp)) {
+                                    // Monitor header
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(bottom = 6.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(6.dp)
+                                                    .clip(CircleShape)
+                                                    .background(AccentGreen)
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text(
+                                                "LIVE FEED",
+                                                color = AccentGreen,
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                letterSpacing = 1.sp
+                                            )
+                                        }
+                                        Text(
+                                            "UCI LOG PORT",
+                                            color = TextSecondary,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                    HorizontalDivider(color = AccentGreen.copy(alpha = 0.1f), modifier = Modifier.padding(bottom = 8.dp))
+
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .heightIn(max = 110.dp)
+                                    ) {
+                                        consoleLog.takeLast(7).forEach { line ->
+                                            Text(
+                                                line,
+                                                color = AccentGreen.copy(alpha = 0.85f),
+                                                fontSize = 9.sp,
+                                                maxLines = 1,
+                                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                                modifier = Modifier.padding(vertical = 1.dp)
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -818,23 +1063,48 @@ fun ControlPanel(
 }
 
 @Composable
-fun SettingsToggle(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+fun SettingsToggle(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    iconColor: Color,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 6.dp),
+            .padding(vertical = 8.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(label, color = Color.White, fontSize = 13.sp)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(iconColor.copy(alpha = 0.1f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = label,
+                    tint = iconColor,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Text(label, color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+        }
         Switch(
             checked = checked,
             onCheckedChange = onCheckedChange,
             colors = SwitchDefaults.colors(
                 checkedThumbColor = Color.White,
-                checkedTrackColor = Color(0xFF7C4DFF),
-                uncheckedThumbColor = Color.White.copy(alpha = 0.5f),
-                uncheckedTrackColor = Color.White.copy(alpha = 0.1f)
+                checkedTrackColor = AccentPurple,
+                uncheckedThumbColor = Color.White.copy(alpha = 0.4f),
+                uncheckedTrackColor = Color.White.copy(alpha = 0.08f),
+                checkedBorderColor = Color.Transparent,
+                uncheckedBorderColor = Color.Transparent
             )
         )
     }
@@ -847,9 +1117,9 @@ fun GlassCard(
 ) {
     Card(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
-            containerColor = Color.White.copy(alpha = 0.06f)
+            containerColor = GlassWhite
         )
     ) {
         Box(
@@ -857,8 +1127,8 @@ fun GlassCard(
                 .fillMaxWidth()
                 .border(
                     width = 0.5.dp,
-                    color = Color.White.copy(alpha = 0.08f),
-                    shape = RoundedCornerShape(14.dp)
+                    color = GlassBorder,
+                    shape = RoundedCornerShape(16.dp)
                 )
         ) {
             content()

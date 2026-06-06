@@ -52,9 +52,12 @@ class EngineProcess(private val scope: CoroutineScope) {
             processBuilder.directory(engineFile.parentFile)
 
             val startedProcess = processBuilder.start()
-            process = startedProcess
-            writer = OutputStreamWriter(startedProcess.outputStream)
-            _isRunning.value = true
+            val startedWriter = OutputStreamWriter(startedProcess.outputStream)
+            synchronized(lock) {
+                process = startedProcess
+                writer = startedWriter
+                _isRunning.value = true
+            }
 
             // Start reading stdout in a coroutine
             readerJob = scope.launch(Dispatchers.IO) {
@@ -71,7 +74,14 @@ class EngineProcess(private val scope: CoroutineScope) {
                         Log.e(TAG, "Error reading engine output", e)
                     }
                 } finally {
-                    _isRunning.value = false
+                    synchronized(lock) {
+                        if (process === startedProcess) {
+                            process = null
+                            writer = null
+                            _isRunning.value = false
+                            _engineName.value = "No Engine"
+                        }
+                    }
                 }
             }
 
@@ -133,19 +143,27 @@ class EngineProcess(private val scope: CoroutineScope) {
         readerJob?.cancel()
         readerJob = null
 
-        try {
-            writer?.close()
-        } catch (_: Exception) {}
-        writer = null
+        val (writerToClose, processToDestroy) = synchronized(lock) {
+            val currentWriter = writer
+            val currentProcess = process
+            writer = null
+            process = null
 
-        try {
-            process?.destroy()
-        } catch (_: Exception) {}
-        process = null
+            if (clearPendingCommands) {
+                pendingCommands.clear()
+            }
 
-        if (clearPendingCommands) {
-            synchronized(lock) { pendingCommands.clear() }
+            currentWriter to currentProcess
         }
+
+        try {
+            writerToClose?.close()
+        } catch (_: Exception) {}
+
+        try {
+            processToDestroy?.destroy()
+        } catch (_: Exception) {}
+
         _isRunning.value = false
         _engineName.value = "No Engine"
     }
