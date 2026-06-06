@@ -67,6 +67,9 @@ class MainActivity : ComponentActivity() {
     private var cachedCombinedScript: String? = null
     private val engineScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
+    // Holds a reference to the WebView so the back-press callback can call goBack()
+    private var activeWebView: WebView? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -88,6 +91,23 @@ class MainActivity : ComponentActivity() {
                 ChessMintApp()
             }
         }
+
+        // ── Back-button: navigate WebView history instead of exiting ──────
+        onBackPressedDispatcher.addCallback(this,
+            object : androidx.activity.OnBackPressedCallback(true) {
+                override fun handleOnBackPressed() {
+                    val wv = activeWebView
+                    if (wv != null && wv.canGoBack()) {
+                        wv.goBack()
+                    } else {
+                        // No more history — let the system handle it (home/minimize)
+                        isEnabled = false
+                        onBackPressedDispatcher.onBackPressed()
+                        isEnabled = true
+                    }
+                }
+            }
+        )
     }
 
     override fun onDestroy() {
@@ -271,6 +291,7 @@ class MainActivity : ComponentActivity() {
                         }
 
                         webView = this
+                        activeWebView = this   // keep class-level ref for back handler
                         loadUrl("https://www.chess.com")
                     }
                 }
