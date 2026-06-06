@@ -2,6 +2,7 @@ package com.example.updatedchessmint
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
@@ -48,8 +49,8 @@ import com.example.updatedchessmint.theme.UpdatedChessMintTheme
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collectLatest
 import java.io.BufferedReader
-import java.io.File
 import java.io.InputStreamReader
+import java.util.Locale
 
 class MainActivity : ComponentActivity() {
 
@@ -96,7 +97,6 @@ class MainActivity : ComponentActivity() {
         var engineRunning by remember { mutableStateOf(false) }
         var currentEngineName by remember { mutableStateOf("No Engine") }
         var availableEngines by remember { mutableStateOf<List<ChessEngine>>(emptyList()) }
-        var showEngineSelector by remember { mutableStateOf(false) }
         var consoleLog by remember { mutableStateOf<List<String>>(emptyList()) }
         var pageLoaded by remember { mutableStateOf(false) }
 
@@ -111,11 +111,11 @@ class MainActivity : ComponentActivity() {
 
         // Discover engines
         LaunchedEffect(Unit) {
-            withContext(Dispatchers.IO) {
+            val engines = withContext(Dispatchers.IO) {
                 val resolver = ChessEngineResolver(context)
-                val engines = resolver.resolveEngines()
-                availableEngines = engines
+                resolver.resolveEngines()
             }
+            availableEngines = engines
         }
 
         // Collect engine state
@@ -151,19 +151,24 @@ class MainActivity : ComponentActivity() {
                         settings.apply {
                             javaScriptEnabled = true
                             domStorageEnabled = true
-                            allowFileAccess = true
-                            mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                            allowFileAccess = false
+                            allowContentAccess = false
+                            mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
                             useWideViewPort = true
                             loadWithOverviewMode = true
                             builtInZoomControls = true
                             displayZoomControls = false
                             databaseEnabled = true
                             mediaPlaybackRequiresUserGesture = false
+                            javaScriptCanOpenWindowsAutomatically = false
                             userAgentString = settings.userAgentString.replace(
                                 "; wv", ""
                             ) // Remove WebView indicator from UA
                             cacheMode = WebSettings.LOAD_DEFAULT
                             setSupportMultipleWindows(false)
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                safeBrowsingEnabled = true
+                            }
                         }
 
                         // Create the engine process
@@ -190,12 +195,12 @@ class MainActivity : ComponentActivity() {
                             ): Boolean {
                                 val url = request?.url?.toString() ?: return false
                                 // Keep chess.com navigation inside the WebView
-                                return !url.contains("chess.com")
+                                return !isAllowedChessUrl(url)
                             }
 
                             override fun onPageFinished(view: WebView?, url: String?) {
                                 super.onPageFinished(view, url)
-                                if (url?.contains("chess.com") == true) {
+                                if (isAllowedChessUrl(url)) {
                                     pageLoaded = true
                                     injectScripts(view, ctx)
                                 }
@@ -352,9 +357,14 @@ class MainActivity : ComponentActivity() {
                 val resolver = ChessEngineResolver(context)
                 val engineFile = resolver.copyEngineToFiles(engine)
                 if (engineFile != null && engineFile.exists()) {
-                    engineProcess?.start(engineFile, engine.name)
+                    val started = engineProcess?.start(engineFile, engine.name) == true
                     withContext(Dispatchers.Main) {
-                        Toast.makeText(context, "Engine started: ${engine.name}", Toast.LENGTH_SHORT).show()
+                        val message = if (started) {
+                            "Engine started: ${engine.name}"
+                        } else {
+                            "Failed to start engine process"
+                        }
+                        Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
                     }
                 } else {
                     withContext(Dispatchers.Main) {
@@ -367,6 +377,18 @@ class MainActivity : ComponentActivity() {
                     Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
                 }
             }
+        }
+    }
+
+    private fun isAllowedChessUrl(url: String?): Boolean {
+        if (url.isNullOrBlank()) return false
+        return try {
+            val parsed = Uri.parse(url)
+            val scheme = parsed.scheme?.lowercase(Locale.US)
+            val host = parsed.host?.lowercase(Locale.US) ?: return false
+            (scheme == "https" || scheme == "http") && (host == "chess.com" || host.endsWith(".chess.com"))
+        } catch (_: Exception) {
+            false
         }
     }
 
@@ -503,7 +525,7 @@ fun ControlPanel(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            "♟ UpdatedChessMint",
+                            "UpdatedChessMint",
                             color = Color.White,
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold

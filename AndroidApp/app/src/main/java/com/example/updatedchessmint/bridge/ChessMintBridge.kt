@@ -4,6 +4,7 @@ import android.util.Log
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import com.example.updatedchessmint.engine.EngineProcess
+import org.json.JSONObject
 
 /**
  * JavaScript interface bridge between WebView (Mint.js) and the native engine process.
@@ -72,14 +73,10 @@ class ChessMintBridge(
      * Must be called on the main thread.
      */
     fun sendToJavaScript(line: String) {
-        val escapedLine = line
-            .replace("\\", "\\\\")
-            .replace("'", "\\'")
-            .replace("\n", "\\n")
-            .replace("\r", "\\r")
+        val quotedLine = JSONObject.quote(line)
         webView.post {
             webView.evaluateJavascript(
-                "if(window.onEngineResponse){window.onEngineResponse('$escapedLine');}",
+                "if(window.onEngineResponse){window.onEngineResponse($quotedLine);}",
                 null
             )
         }

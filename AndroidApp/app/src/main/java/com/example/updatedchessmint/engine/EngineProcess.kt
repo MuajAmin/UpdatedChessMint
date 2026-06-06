@@ -21,11 +21,14 @@ class EngineProcess(private val scope: CoroutineScope) {
 
     companion object {
         private const val TAG = "EngineProcess"
+        private const val MAX_PENDING_COMMANDS = 128
     }
 
     private var process: Process? = null
     private var writer: OutputStreamWriter? = null
     private var readerJob: Job? = null
+    private val lock = Any()
+    private val pendingCommands = ArrayDeque<String>()
 
     private val _outputFlow = MutableSharedFlow<String>(extraBufferCapacity = 256)
     val outputFlow: SharedFlow<String> = _outputFlow.asSharedFlow()
@@ -39,41 +42,47 @@ class EngineProcess(private val scope: CoroutineScope) {
     /**
      * Starts the engine process from the given executable file.
      */
-    fun start(engineFile: File, name: String = "Engine") {
-        stop() // Stop any existing process
+    fun start(engineFile: File, name: String = "Engine"): Boolean {
+        stop(clearPendingCommands = false) // Stop any existing process
 
-        try {
+        return try {
             _engineName.value = name
             val processBuilder = ProcessBuilder(engineFile.absolutePath)
             processBuilder.redirectErrorStream(true)
             processBuilder.directory(engineFile.parentFile)
 
-            process = processBuilder.start()
-            writer = OutputStreamWriter(process!!.outputStream)
+            val startedProcess = processBuilder.start()
+            process = startedProcess
+            writer = OutputStreamWriter(startedProcess.outputStream)
             _isRunning.value = true
 
             // Start reading stdout in a coroutine
             readerJob = scope.launch(Dispatchers.IO) {
                 try {
-                    val reader = BufferedReader(InputStreamReader(process!!.inputStream))
-                    var line: String?
-                    while (isActive) {
-                        line = reader.readLine()
-                        if (line == null) break
-                        Log.d(TAG, "Engine: $line")
-                        _outputFlow.emit(line)
+                    BufferedReader(InputStreamReader(startedProcess.inputStream)).use { reader ->
+                        while (isActive) {
+                            val line = reader.readLine() ?: break
+                            Log.d(TAG, "Engine: $line")
+                            _outputFlow.emit(line)
+                        }
                     }
                 } catch (e: Exception) {
-                    Log.e(TAG, "Error reading engine output", e)
+                    if (isActive) {
+                        Log.e(TAG, "Error reading engine output", e)
+                    }
                 } finally {
                     _isRunning.value = false
                 }
             }
 
+            flushPendingCommands()
             Log.i(TAG, "Engine process started: ${engineFile.absolutePath}")
+            true
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start engine", e)
             _isRunning.value = false
+            _engineName.value = "No Engine"
+            false
         }
     }
 
@@ -81,21 +90,46 @@ class EngineProcess(private val scope: CoroutineScope) {
      * Sends a UCI command to the engine.
      */
     fun sendCommand(command: String) {
-        try {
-            writer?.let { w ->
-                w.write("$command\n")
-                w.flush()
-                Log.d(TAG, "Sent: $command")
+        val targetWriter = synchronized(lock) {
+            val activeWriter = writer
+            if (activeWriter == null || !_isRunning.value) {
+                enqueuePendingCommand(command)
+                null
+            } else {
+                activeWriter
             }
+        }
+
+        try {
+            targetWriter?.write("$command\n")
+            targetWriter?.flush()
+            if (targetWriter != null) Log.d(TAG, "Sent: $command")
         } catch (e: Exception) {
             Log.e(TAG, "Error sending command: $command", e)
         }
     }
 
+    private fun enqueuePendingCommand(command: String) {
+        if (pendingCommands.size == MAX_PENDING_COMMANDS) {
+            pendingCommands.removeFirst()
+        }
+        pendingCommands.addLast(command)
+        Log.d(TAG, "Queued until engine starts: $command")
+    }
+
+    private fun flushPendingCommands() {
+        val commands = synchronized(lock) {
+            val copy = pendingCommands.toList()
+            pendingCommands.clear()
+            copy
+        }
+        commands.forEach { sendCommand(it) }
+    }
+
     /**
      * Stops the engine process and cleans up resources.
      */
-    fun stop() {
+    fun stop(clearPendingCommands: Boolean = true) {
         readerJob?.cancel()
         readerJob = null
 
@@ -109,6 +143,9 @@ class EngineProcess(private val scope: CoroutineScope) {
         } catch (_: Exception) {}
         process = null
 
+        if (clearPendingCommands) {
+            synchronized(lock) { pendingCommands.clear() }
+        }
         _isRunning.value = false
         _engineName.value = "No Engine"
     }

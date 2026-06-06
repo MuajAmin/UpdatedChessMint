@@ -10,6 +10,16 @@
 (function() {
     'use strict';
 
+    window.UpdatedChessMintConfig = window.UpdatedChessMintConfig || {
+        pathToEcoJson: "data:application/json,[]",
+        threadedEnginePaths: {
+            stockfish: {
+                multiThreaded: { loader: "", engine: "" },
+                singleThreaded: { loader: "", engine: "" }
+            }
+        }
+    };
+
     // ========================================================================
     // Default Options (ported from loader.js / options.js)
     // ========================================================================

@@ -129,7 +129,16 @@ var enumOptions = {
 };
 
 var UpdatedChessMintmaster;
-var Config = undefined;
+var Config =
+  (typeof window !== "undefined" && window.UpdatedChessMintConfig) || {
+    pathToEcoJson: "data:application/json,[]",
+    threadedEnginePaths: {
+      stockfish: {
+        multiThreaded: { loader: "", engine: "" },
+        singleThreaded: { loader: "", engine: "" },
+      },
+    },
+  };
 var context = undefined;
 var eTable = null;
 
@@ -470,7 +479,6 @@ class GameController {
 class StockfishEngine {
   constructor(UpdatedChessMintmaster) {
     let stockfishJsURL;
-    let stockfishPathConfig = Config.threadedEnginePaths.stockfish;
     this.UpdatedChessMintmaster = UpdatedChessMintmaster;
     this.loaded = false;
     this.stopInFlight = false;
@@ -497,6 +505,7 @@ class StockfishEngine {
 
     // Initialize Stockfish
     if (!getValueConfig(enumOptions.ApiStockfish)) {
+      let stockfishPathConfig = Config.threadedEnginePaths.stockfish;
       try {
         new SharedArrayBuffer(getValueConfig(enumOptions.HashtableRam));
         stockfishJsURL = `${stockfishPathConfig.multiThreaded.loader}#${stockfishPathConfig.multiThreaded.engine}`;
@@ -1335,12 +1344,18 @@ uniquely identify each request and match the response to the correct request. */
 
 function InitUpdatedChessMint(chessboard) {
   // Fetch the ECO table
-  fetch(Config.pathToEcoJson).then(function (response) {
-    return __awaiter(this, void 0, void 0, function* () {
-      let table = yield response.json();
-      eTable = new Map(table.map((data) => [data.f, true]));
+  if (Config.pathToEcoJson) {
+    fetch(Config.pathToEcoJson).then(function (response) {
+      return __awaiter(this, void 0, void 0, function* () {
+        let table = yield response.json();
+        eTable = new Map(table.map((data) => [data.f, true]));
+      });
+    }).catch(function () {
+      eTable = new Map();
     });
-  });
+  } else {
+    eTable = new Map();
+  }
 
   // Get the extension options
   ChromeRequest.getData().then(function (options) {

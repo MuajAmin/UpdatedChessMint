@@ -74,20 +74,30 @@ class ChessEngineResolver(private val context: Context) {
      * Returns the File pointing to the executable, or null if copy failed.
      */
     fun copyEngineToFiles(engine: ChessEngine): File? {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+            context.applicationInfo.targetSdkVersion >= Build.VERSION_CODES.Q
+        ) {
+            throw UnsupportedOperationException(
+                "Android 10+ blocks executing OEX engines copied into app storage for this target SDK. Bundle a native engine in the APK or use an engine service."
+            )
+        }
+
         return try {
             val abi = getCurrentAbi()
             val contentUri = Uri.parse("content://${engine.authority}/$abi")
 
-            val inputStream = context.contentResolver.openInputStream(contentUri) ?: return null
             val engineFile = File(context.filesDir, "engine_${engine.packageName.replace(".", "_")}")
 
-            FileOutputStream(engineFile).use { output ->
-                inputStream.copyTo(output)
-            }
-            inputStream.close()
+            context.contentResolver.openInputStream(contentUri)?.use { input ->
+                FileOutputStream(engineFile).use { output ->
+                    input.copyTo(output)
+                }
+            } ?: return null
 
-            // Make the binary executable
-            engineFile.setExecutable(true, true)
+            if (!engineFile.setExecutable(true, true)) {
+                return null
+            }
+
             engineFile
         } catch (e: Exception) {
             e.printStackTrace()
